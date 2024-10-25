@@ -128,7 +128,14 @@ pub struct TupleStruct {
 #[derive(Clone)]
 pub struct FieldsStruct {
     pub info: ItemInfo,
-    pub fields: ThinVec<(VisModifier, ASTId, Type)>,
+    pub fields: HashMap<IdKey, FieldInfo>,
+}
+
+#[derive(Clone)]
+pub struct FieldInfo {
+    pub vis: VisModifier,
+    pub id_span: Span,
+    pub typ: Type,
 }
 
 #[derive(Clone)]

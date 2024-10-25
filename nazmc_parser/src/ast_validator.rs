@@ -1,30 +1,68 @@
 use crate::*;
 use nazmc_ast::FileKey;
-use nazmc_data_pool::IdKey;
-use std::collections::HashMap;
+use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
+use nazmc_diagnostics::eprint_diagnostics;
+use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
 
-pub type NameConflicts = HashMap<PkgKey, HashMap<IdKey, HashMap<FileKey, Vec<Span>>>>;
-//                               ^^^^^^          ^^^^^          ^^^^^        ^^^^ spans found in each file
+type ItemsConflictsInPkgs = HashMap<PkgKey, HashMap<IdKey, HashMap<FileKey, Vec<Span>>>>;
+//                               ^^^^^^          ^^^^^          ^^^^^           ^^^^ spans found in each file
 //                               |               |              |
 //                               |               |              file key: All conflicts in a file that belong to the same pkg
 //                               |               The conflicting name in a pkg
 //                               pkg key (The pkg that has conflicts)
 
-pub(crate) struct ASTGenerator<'a> {
+type StructFieldsConflictsInFiles = HashMap<(IdKey, FileKey, Span), Vec<Span>>;
+//                                           ^^^^^  ^^^^^^^  ^^^^       ^^^^ spans found
+//                                           |      |        |
+//                                           |      |        The struct id span
+//                                           |      The file key
+//                                           The conflicting field name in a file
+
+type FnParamsConflictsInFiles = HashMap<(IdKey, FileKey, Span), Vec<Span>>;
+//                                       ^^^^^  ^^^^^^^  ^^^^       ^^^^ spans found
+//                                       |      |        |
+//                                       |      |        The fn id span
+//                                       |      The file key
+//                                       The conflicting param name in a file
+
+type ItemsAndImportsConflictsInFiles = HashMap<(IdKey, FileKey), Vec<Span>>;
+//                                              ^^^^^  ^^^^^^^       ^^^^ spans found
+//                                              |      |
+//                                              |      The file key
+//                                              The conflicting name in a file
+
+pub struct ASTValidator<'a> {
     pub(crate) pkg_key: PkgKey,
     pub(crate) file_key: FileKey,
     pub(crate) ast: &'a mut nazmc_ast::AST,
-    pub(crate) name_conflicts: &'a mut NameConflicts,
+    pub(crate) items_names_in_current_file: HashMap<IdKey, Span>,
+    pub(crate) params_names_in_current_fn: HashMap<IdKey, Span>,
+    pub(crate) items_conflicts_in_pkgs: ItemsConflictsInPkgs,
+    pub(crate) struct_fields_conflicts_in_files: StructFieldsConflictsInFiles,
+    pub(crate) fn_params_conflicts_in_files: FnParamsConflictsInFiles,
+    pub(crate) items_and_imports_conflicts_in_files: ItemsAndImportsConflictsInFiles,
 }
 
-impl<'a> ASTGenerator<'a> {
+impl<'a> ASTValidator<'a> {
+    pub fn new(ast: &'a mut nazmc_ast::AST) -> Self {
+        Self {
+            ast,
+            pkg_key: Default::default(),
+            file_key: Default::default(),
+            items_names_in_current_file: Default::default(),
+            params_names_in_current_fn: Default::default(),
+            items_conflicts_in_pkgs: Default::default(),
+            struct_fields_conflicts_in_files: Default::default(),
+            fn_params_conflicts_in_files: Default::default(),
+            items_and_imports_conflicts_in_files: Default::default(),
+        }
+    }
+
     pub(crate) fn lower_file(&mut self, file: File) {
-        self.ast
-            .pkgs_to_items
-            .resize(usize::from(self.pkg_key) + 1, HashMap::new());
-        self.lower_imports(file.imports);
+        self.items_names_in_current_file.clear();
         self.lower_file_items(file.content.items);
+        self.lower_imports(file.imports);
     }
 
     #[inline]
@@ -88,6 +126,15 @@ impl<'a> ASTGenerator<'a> {
                     id: item_id,
                 };
 
+                if let Some(span_of_item_with_same_name) =
+                    self.items_names_in_current_file.get(&alias.id)
+                {
+                    self.items_and_imports_conflicts_in_files
+                        .entry((alias.id, self.file_key))
+                        .or_insert_with(|| vec![*span_of_item_with_same_name])
+                        .push(alias.span);
+                }
+
                 self.ast.imports[self.file_key].push(nazmc_ast::ImportStm {
                     item_path: nazmc_ast::ItemPath { pkg_path, item },
                     alias,
@@ -125,6 +172,8 @@ impl<'a> ASTGenerator<'a> {
                     if self.check_if_name_conflicts(id, id_span) {
                         continue;
                     }
+
+                    self.items_names_in_current_file.insert(id, id_span);
 
                     let info = nazmc_ast::ItemInfo {
                         file_key: self.file_key,
@@ -166,7 +215,7 @@ impl<'a> ASTGenerator<'a> {
                             self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                         StructKind::Fields(struct_fields) => {
-                            let mut fields = ThinVec::new();
+                            let mut fields = HashMap::new();
 
                             if let Some(PunctuatedStructField {
                                 first_item,
@@ -174,12 +223,20 @@ impl<'a> ASTGenerator<'a> {
                                 trailing_comma: _,
                             }) = struct_fields.items
                             {
-                                let first = self.lower_struct_field(first_item.unwrap());
-                                fields.push(first);
+                                let (id, field_info) = self.lower_struct_field(first_item.unwrap());
+                                fields.insert(id, field_info);
 
                                 for r in rest_items {
-                                    let field = self.lower_struct_field(r.unwrap().item);
-                                    fields.push(field);
+                                    let (id, field_info) = self.lower_struct_field(r.unwrap().item);
+
+                                    if let Some(field_with_same_id) = fields.get(&id) {
+                                        self.struct_fields_conflicts_in_files
+                                            .entry((id, self.file_key, name.span))
+                                            .or_insert_with(|| vec![field_with_same_id.id_span])
+                                            .push(field_info.id_span);
+                                    } else {
+                                        fields.insert(id, field_info);
+                                    }
                                 }
                             }
 
@@ -202,10 +259,14 @@ impl<'a> ASTGenerator<'a> {
                         continue;
                     }
 
+                    self.items_names_in_current_file.insert(id, id_span);
+
                     let info = nazmc_ast::ItemInfo {
                         file_key: self.file_key,
                         id_span,
                     };
+
+                    self.params_names_in_current_fn.clear();
 
                     let mut params = ThinVec::new();
 
@@ -216,10 +277,22 @@ impl<'a> ASTGenerator<'a> {
                     }) = f.params_decl.unwrap().items
                     {
                         let first = self.lower_fn_param(first_item.unwrap());
+                        self.params_names_in_current_fn
+                            .insert(first.0.id, first.0.span);
                         params.push(first);
 
                         for r in rest_items {
                             let param = self.lower_fn_param(r.unwrap().item);
+
+                            if let Some(span_of_param_with_same_name) =
+                                self.params_names_in_current_fn.get(&param.0.id)
+                            {
+                                self.fn_params_conflicts_in_files
+                                    .entry((param.0.id, self.file_key, name.span))
+                                    .or_insert_with(|| vec![*span_of_param_with_same_name])
+                                    .push(param.0.span);
+                            }
+
                             params.push(param);
                         }
                     }
@@ -252,7 +325,7 @@ impl<'a> ASTGenerator<'a> {
             return false;
         };
 
-        self.name_conflicts
+        self.items_conflicts_in_pkgs
             .entry(self.pkg_key)
             .or_default()
             .entry(id)
@@ -305,10 +378,7 @@ impl<'a> ASTGenerator<'a> {
         (vis, typ)
     }
 
-    fn lower_struct_field(
-        &mut self,
-        field: StructField,
-    ) -> (nazmc_ast::VisModifier, nazmc_ast::ASTId, nazmc_ast::Type) {
+    fn lower_struct_field(&mut self, field: StructField) -> (IdKey, nazmc_ast::FieldInfo) {
         let vis = match field.visibility {
             Some(Terminal {
                 data: syntax::VisModifierToken::Public,
@@ -321,14 +391,16 @@ impl<'a> ASTGenerator<'a> {
             None => nazmc_ast::VisModifier::Default,
         };
 
-        let name = nazmc_ast::ASTId {
-            span: field.name.span,
-            id: field.name.data.val,
-        };
-
         let typ = self.lower_type(field.typ.unwrap().typ.unwrap());
 
-        (vis, name, typ)
+        (
+            field.name.data.val,
+            nazmc_ast::FieldInfo {
+                vis,
+                id_span: field.name.span,
+                typ,
+            },
+        )
     }
 
     fn lower_fn_param(&mut self, param: FnParam) -> (nazmc_ast::ASTId, nazmc_ast::Type) {
@@ -1221,6 +1293,101 @@ impl<'a> ASTGenerator<'a> {
     fn lower_when_expr(&mut self, _when_expr: WhenExpr) -> nazmc_ast::Expr {
         todo!()
     }
+
+    pub fn validate(
+        self,
+        pkgs: &TiSlice<PkgKey, ThinVec<IdKey>>,
+        files_infos: &TiSlice<FileKey, FileInfo>,
+        id_pool: &TiSlice<IdKey, String>,
+    ) {
+        let mut diagnostics = vec![];
+
+        for (pkg_key, conflicts) in self.items_conflicts_in_pkgs {
+            let pkg_display_name = pkgs[pkg_key]
+                .iter()
+                .map(|name| id_pool[*name].as_str())
+                .collect::<Vec<_>>()
+                .join("::");
+
+            for (conflicting_name, files_conflicts) in conflicts {
+                let name = &id_pool[conflicting_name];
+                let msg = format!(
+                    "يوجد أكثر من عنصر لهم نفس الاسم `{}` في نفس الحزمة `{}`",
+                    name, pkg_display_name
+                );
+                let mut diagnostic = Diagnostic::error(msg, vec![]);
+                let mut occurrences = 1;
+                for (file_key, spans) in files_conflicts {
+                    let file_info = &files_infos[file_key];
+                    let code_window =
+                        occurrences_code_window(file_info, &mut occurrences, spans, "عنصر");
+                    diagnostic.push_code_window(code_window);
+                }
+                diagnostics.push(diagnostic);
+            }
+        }
+
+        for ((field_id_key, file_key, struct_id_span), spans) in
+            self.struct_fields_conflicts_in_files
+        {
+            let file_info = &files_infos[file_key];
+
+            let name = &id_pool[field_id_key];
+
+            let msg = format!("يوجد أكثر من حقل لهم نفس الاسم `{}` في نفس الهيكل", name);
+
+            let mut occurrences = 1;
+
+            let mut code_window =
+                occurrences_code_window(file_info, &mut occurrences, spans, "حقل");
+
+            code_window.mark_secondary(struct_id_span, vec!["في هذا الهيكل".to_string()]);
+
+            let diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+            diagnostics.push(diagnostic);
+        }
+
+        for ((param_id_key, file_key, fn_id_span), spans) in self.fn_params_conflicts_in_files {
+            let file_info = &files_infos[file_key];
+
+            let name = &id_pool[param_id_key];
+
+            let msg = format!("يوجد أكثر من مُعامِل لهم نفس الاسم `{}` في نفس الدالة", name);
+
+            let mut occurrences = 1;
+
+            let mut code_window =
+                occurrences_code_window(file_info, &mut occurrences, spans, "مُعامِل");
+
+            code_window.mark_secondary(fn_id_span, vec!["في هذه الدالة".to_string()]);
+
+            let diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+            diagnostics.push(diagnostic);
+        }
+
+        for ((id_key, file_key), spans) in self.items_and_imports_conflicts_in_files {
+            let file_info = &files_infos[file_key];
+
+            let name = &id_pool[id_key];
+
+            let msg = format!("يوجد أكثر من عنصر لهم نفس الاسم `{}` في نفس الملف", name);
+
+            let mut occurrences = 1;
+
+            let code_window = occurrences_code_window(file_info, &mut occurrences, spans, "عنصر");
+
+            let diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+            diagnostics.push(diagnostic);
+        }
+
+        if !diagnostics.is_empty() {
+            eprint_diagnostics(diagnostics);
+            exit(1)
+        }
+    }
 }
 
 #[inline]
@@ -1305,4 +1472,41 @@ fn lower_unary_op(op: UnaryOpToken) -> nazmc_ast::UnaryOp {
         UnaryOpToken::Borrow => nazmc_ast::UnaryOp::Borrow,
         UnaryOpToken::BorrowMut => nazmc_ast::UnaryOp::BorrowMut,
     }
+}
+
+fn occurrences_code_window<'a>(
+    file_info: &'a FileInfo,
+    occurrences: &mut usize,
+    mut spans: Vec<Span>,
+    name: &'static str,
+) -> CodeWindow<'a> {
+    let mut code_window = CodeWindow::new(file_info, spans[0].start);
+
+    nazmc_diagnostics::span::sort_spans(&mut spans);
+
+    for span in spans {
+        let occurrence_str = match *occurrences {
+            1 => format!("هنا تم العثور على أول {} بهذا الاسم", name),
+            2 => "هنا تم العثور على نفس الاسم للمرة الثانية".to_string(),
+            3 => "هنا تم العثور على نفس الاسم للمرة الثالثة".to_string(),
+            4 => "هنا تم العثور على نفس الاسم للمرة الرابعة".to_string(),
+            5 => "هنا تم العثور على نفس الاسم للمرة الخامسة".to_string(),
+            6 => "هنا تم العثور على نفس الاسم للمرة السادسة".to_string(),
+            7 => "هنا تم العثور على نفس الاسم للمرة السابعة".to_string(),
+            8 => "هنا تم العثور على نفس الاسم للمرة الثامنة".to_string(),
+            9 => "هنا تم العثور على نفس الاسم للمرة التاسعة".to_string(),
+            10 => "هنا تم العثور على نفس الاسم للمرة العاشرة".to_string(),
+            o => format!("هنا تم العثور على نفس الاسم للمرة {}", o),
+        };
+
+        if *occurrences == 1 {
+            code_window.mark_error(span, vec![occurrence_str]);
+        } else {
+            code_window.mark_secondary(span, vec![occurrence_str]);
+        }
+
+        *occurrences += 1;
+    }
+
+    code_window
 }

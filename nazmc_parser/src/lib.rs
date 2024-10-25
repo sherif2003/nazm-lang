@@ -1,4 +1,4 @@
-use ast_generator::ASTGenerator;
+pub use ast_validator::ASTValidator;
 use error::*;
 use nazmc_ast::{FileKey, PkgKey};
 use nazmc_diagnostics::{
@@ -7,12 +7,10 @@ use nazmc_diagnostics::{
 use nazmc_lexer::*;
 use syntax::File;
 
-mod ast_generator;
+mod ast_validator;
 pub(crate) mod parse_methods;
 pub(crate) mod syntax;
 pub(crate) mod tokens_iter;
-
-pub use ast_generator::NameConflicts;
 pub(crate) use nazmc_diagnostics::span::Span;
 pub(crate) use nazmc_parse_derive::*;
 pub(crate) use parse_methods::*;
@@ -24,8 +22,7 @@ pub fn parse(
     file_info: &FileInfo,
     file_content: &str,
     lexer_errors: Vec<LexerError>,
-    ast: &mut nazmc_ast::AST,
-    name_conflicts: &mut NameConflicts,
+    ast_validator: &mut ASTValidator,
     pkg_key: PkgKey,
     file_key: FileKey,
 ) -> Result<(), String> {
@@ -47,13 +44,9 @@ pub fn parse(
     reporter.check_file(&file);
 
     if reporter.diagnostics.is_empty() {
-        ASTGenerator {
-            pkg_key,
-            file_key,
-            ast,
-            name_conflicts,
-        }
-        .lower_file(file);
+        ast_validator.pkg_key = pkg_key;
+        ast_validator.file_key = file_key;
+        ast_validator.lower_file(file);
 
         Ok(())
     } else {

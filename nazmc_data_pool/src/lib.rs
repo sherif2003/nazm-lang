@@ -58,9 +58,9 @@ where
 
         let ptr: *mut V = data.as_mut_ptr();
 
-        for (key, index) in self.map {
+        for (val, index) in self.map {
             unsafe {
-                ptr.add(index).write(key);
+                ptr.add(index).write(val);
             }
         }
 
