@@ -1,6 +1,8 @@
 mod cli;
 use cli::print_err;
-use nazmc_data_pool::{IdPool, StrPool};
+use nazmc_ast::{FileKey, PkgPoolBuilder};
+use nazmc_data_pool::typed_index_collections::{ti_vec, TiVec};
+use nazmc_data_pool::{IdPoolBuilder, StrPoolBuilder};
 use nazmc_diagnostics::file_info::FileInfo;
 use nazmc_lexer::LexerIter;
 use nazmc_parser::parse;
@@ -109,10 +111,10 @@ fn main() {
     io::stderr().write_all(output).unwrap();
 
     let files_paths = get_file_paths();
-    let mut id_pool = IdPool::with_key();
-    let mut str_pool = StrPool::with_key();
-    let mut pkgs = HashMap::new();
-    let mut files_infos = vec![];
+    let mut id_pool = IdPoolBuilder::new();
+    let mut str_pool = StrPoolBuilder::new();
+    let mut pkgs = PkgPoolBuilder::new();
+    let mut files_infos = TiVec::<FileKey, FileInfo>::new();
     let mut ast = nazmc_ast::AST::default();
     let mut diagnostics: Vec<String> = vec![];
     let mut fail_after_parsing = false;
@@ -121,9 +123,9 @@ fn main() {
     // Register the unit type name to index 0
     // main fn id to index 1
     // the implicit lambda param name to index 2
-    id_pool.insert("()".to_string());
-    id_pool.insert("البداية".to_string());
-    let implicit_lambda_param = id_pool.insert("س".to_string());
+    id_pool.get_key(&"()".to_string());
+    id_pool.get_key(&"البداية".to_string());
+    id_pool.get_key(&"س".to_string());
 
     files_paths
         .into_iter()
@@ -131,13 +133,12 @@ fn main() {
         .for_each(|(file_idx, file_path)| {
             let mut pkg_path = file_path
                 .split_terminator('/')
-                .map(|s| id_pool.insert(s.to_string()))
+                .map(|s| id_pool.get_key(&s.to_string()))
                 .collect::<ThinVec<_>>();
 
             pkg_path.pop(); // remove the actual file
 
-            let pkg_idx = pkgs.len();
-            let pkg_idx = *pkgs.entry(pkg_path).or_insert(pkg_idx);
+            let pkg_key = pkgs.get_key(&pkg_path);
 
             let path = format!("{file_path}.نظم");
             let Ok(file_content) = fs::read_to_string(&path) else {
@@ -163,9 +164,8 @@ fn main() {
                 lexer_errors,
                 &mut ast,
                 &mut name_conflicts,
-                implicit_lambda_param,
-                pkg_idx,
-                file_idx,
+                pkg_key,
+                file_idx.into(),
             ) {
                 Ok(_) => {
                     // if pkg_idx >= pkgs_to_files_indexes.len() {
@@ -194,15 +194,7 @@ fn main() {
         exit(1)
     }
 
-    let mut pkgs_names = ThinVec::with_capacity(pkgs.len());
-    for (pkg, idx) in &pkgs {
-        if *idx >= pkgs_names.len() {
-            for _ in pkgs_names.len()..=*idx {
-                pkgs_names.push(ThinVec::default());
-            }
-        }
-        pkgs_names[*idx] = pkg.clone();
-    }
+    let pkgs = pkgs.build();
 
     // let resolver = nazmc_resolve::NameResolver::new(
     //     &id_pool,

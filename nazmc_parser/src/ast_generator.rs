@@ -1,21 +1,21 @@
 use crate::*;
+use nazmc_ast::FileKey;
 use nazmc_data_pool::IdKey;
 use std::collections::HashMap;
 use thin_vec::ThinVec;
 
-pub type NameConflicts = HashMap<usize, HashMap<IdKey, HashMap<usize, Vec<Span>>>>;
-//                               ^^^^^          ^^^^^^^          ^^^^^      ^^^^ spans found in each file
-//                               |              |                |
-//                               |              |                file idx: All conflicts in a file that belong to the same pkg
-//                               |              The conflicting name in a pkg
-//                               pkg idx (The pkg that has conflicts)
+pub type NameConflicts = HashMap<PkgKey, HashMap<IdKey, HashMap<FileKey, Vec<Span>>>>;
+//                               ^^^^^^          ^^^^^          ^^^^^        ^^^^ spans found in each file
+//                               |               |              |
+//                               |               |              file key: All conflicts in a file that belong to the same pkg
+//                               |               The conflicting name in a pkg
+//                               pkg key (The pkg that has conflicts)
 
 pub(crate) struct ASTGenerator<'a> {
-    pub(crate) pkg_idx: usize,
-    pub(crate) file_idx: usize,
+    pub(crate) pkg_key: PkgKey,
+    pub(crate) file_key: FileKey,
     pub(crate) ast: &'a mut nazmc_ast::AST,
     pub(crate) name_conflicts: &'a mut NameConflicts,
-    pub(crate) lambda_implicit_param_key: IdKey,
 }
 
 impl<'a> ASTGenerator<'a> {
@@ -25,14 +25,19 @@ impl<'a> ASTGenerator<'a> {
     }
 
     #[inline]
+    fn new_pkg_path(&self) -> nazmc_ast::PkgPath {
+        nazmc_ast::PkgPath {
+            pkg_key: self.pkg_key,
+            file_key: self.file_key,
+            ids: ThinVec::new(),
+            spans: ThinVec::new(),
+        }
+    }
+
+    #[inline]
     fn lower_imports(&mut self, imports_stms: Vec<ImportStm>) {
         for import_stm in imports_stms {
-            let mut pkg_path = nazmc_ast::PkgPath {
-                pkg_idx: self.pkg_idx,
-                file_idx: self.file_idx,
-                ids: ThinVec::new(),
-                spans: ThinVec::new(),
-            };
+            let mut pkg_path = self.new_pkg_path();
 
             let mut import_all = false;
 
@@ -66,7 +71,7 @@ impl<'a> ASTGenerator<'a> {
             }
 
             if import_all {
-                self.ast.star_imports[self.file_idx].push(pkg_path);
+                self.ast.star_imports[self.file_key].push(pkg_path);
             } else {
                 let item_id = pkg_path.ids.pop().unwrap();
                 let item_span = pkg_path.spans.pop().unwrap();
@@ -80,7 +85,7 @@ impl<'a> ASTGenerator<'a> {
                     id: item_id,
                 };
 
-                self.ast.imports[self.file_idx].push(nazmc_ast::ImportStm {
+                self.ast.imports[self.file_key].push(nazmc_ast::ImportStm {
                     item_path: nazmc_ast::ItemPath { pkg_path, item },
                     alias,
                 });
@@ -119,7 +124,7 @@ impl<'a> ASTGenerator<'a> {
                     }
 
                     let info = nazmc_ast::ItemInfo {
-                        file_idx: self.file_idx,
+                        file_key: self.file_key,
                         id_span,
                     };
 
@@ -129,7 +134,7 @@ impl<'a> ASTGenerator<'a> {
                             let idx = self.ast.unit_structs.len();
                             let item = nazmc_ast::Item::new(kind, vis, idx);
                             self.ast.unit_structs.push(nazmc_ast::UnitStruct { info });
-                            self.ast.pkgs_to_items[self.pkg_idx].insert(id, item);
+                            self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                         StructKind::Tuple(tuple_struct_fields) => {
                             let mut types = ThinVec::new();
@@ -155,7 +160,7 @@ impl<'a> ASTGenerator<'a> {
                             self.ast
                                 .tuple_structs
                                 .push(nazmc_ast::TupleStruct { info, types });
-                            self.ast.pkgs_to_items[self.pkg_idx].insert(id, item);
+                            self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                         StructKind::Fields(struct_fields) => {
                             let mut fields = ThinVec::new();
@@ -181,7 +186,7 @@ impl<'a> ASTGenerator<'a> {
                             self.ast
                                 .fields_structs
                                 .push(nazmc_ast::FieldsStruct { info, fields });
-                            self.ast.pkgs_to_items[self.pkg_idx].insert(id, item);
+                            self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                     }
                 }
@@ -195,7 +200,7 @@ impl<'a> ASTGenerator<'a> {
                     }
 
                     let info = nazmc_ast::ItemInfo {
-                        file_idx: self.file_idx,
+                        file_key: self.file_key,
                         id_span,
                     };
 
@@ -233,19 +238,19 @@ impl<'a> ASTGenerator<'a> {
                         return_type,
                         body,
                     });
-                    self.ast.pkgs_to_items[self.pkg_idx].insert(id, item);
+                    self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
                 }
             }
         }
     }
 
     fn check_if_name_conflicts(&mut self, id: IdKey, id_span: Span) -> bool {
-        let Some(item_with_same_id) = self.ast.pkgs_to_items[self.pkg_idx].get(&id) else {
+        let Some(item_with_same_id) = self.ast.pkgs_to_items[self.pkg_key].get(&id) else {
             return false;
         };
 
         self.name_conflicts
-            .entry(self.pkg_idx)
+            .entry(self.pkg_key)
             .or_default()
             .entry(id)
             .or_insert_with(|| {
@@ -265,11 +270,11 @@ impl<'a> ASTGenerator<'a> {
                     }
                 };
                 HashMap::from([(
-                    first_occurrence_info.file_idx,
+                    first_occurrence_info.file_key,
                     vec![first_occurrence_info.id_span],
                 )])
             })
-            .entry(self.file_idx)
+            .entry(self.file_key)
             .or_default()
             .push(id_span);
 
@@ -434,12 +439,7 @@ impl<'a> ASTGenerator<'a> {
     }
 
     fn lower_simple_path(&mut self, mut simple_path: SimplePath) -> nazmc_ast::ItemPath {
-        let mut pkg_path = nazmc_ast::PkgPath {
-            pkg_idx: self.pkg_idx,
-            file_idx: self.file_idx,
-            ids: ThinVec::new(),
-            spans: ThinVec::new(),
-        };
+        let mut pkg_path = self.new_pkg_path();
 
         let item = if simple_path.inners.is_empty() {
             nazmc_ast::ASTId {
@@ -1123,12 +1123,7 @@ impl<'a> ASTGenerator<'a> {
         let expr = if let Some(e) = e.expr {
             self.lower_expr(e.expr.unwrap())
         } else {
-            let pkg_path = nazmc_ast::PkgPath {
-                pkg_idx: self.pkg_idx,
-                file_idx: self.file_idx,
-                ids: ThinVec::new(),
-                spans: ThinVec::new(),
-            };
+            let pkg_path = self.new_pkg_path();
 
             let item = nazmc_ast::ASTId {
                 span: name.span,
@@ -1183,7 +1178,7 @@ impl<'a> ASTGenerator<'a> {
             params.push(nazmc_ast::Binding {
                 kind: nazmc_ast::BindingKind::Id(nazmc_ast::ASTId {
                     span: lambda_expr.open_curly.span,
-                    id: self.lambda_implicit_param_key,
+                    id: IdKey::IMPLICIT_LAMBDA_PARAM,
                 }),
                 typ: None,
             });

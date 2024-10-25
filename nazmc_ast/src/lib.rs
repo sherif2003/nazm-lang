@@ -1,18 +1,27 @@
+use derive_more::{From, Into};
 pub use item::Item;
-use nazmc_data_pool::{IdKey, StrKey};
+use nazmc_data_pool::{
+    new_data_pool_key, typed_index_collections::TiVec, DataPoolBuilder, IdKey, StrKey,
+};
 use nazmc_diagnostics::span::{Span, SpanCursor};
 use std::collections::HashMap;
 use thin_vec::ThinVec;
 mod item;
 
+new_data_pool_key! { FileKey }
+
+new_data_pool_key! { PkgKey }
+
+pub type PkgPoolBuilder = DataPoolBuilder<PkgKey, ThinVec<IdKey>>;
+
 #[derive(Default)]
 pub struct AST {
     /// The list of maps of items names and their kind, visibility and index
-    pub pkgs_to_items: ThinVec<HashMap<IdKey, Item>>,
+    pub pkgs_to_items: TiVec<PkgKey, HashMap<IdKey, Item>>,
     /// The list of imports stms for each file
-    pub imports: ThinVec<ThinVec<ImportStm>>,
+    pub imports: TiVec<FileKey, ThinVec<ImportStm>>,
     /// The list of star imports for each file
-    pub star_imports: ThinVec<ThinVec<PkgPath>>,
+    pub star_imports: TiVec<FileKey, ThinVec<PkgPath>>,
     /// The list of all types paths
     pub types_paths: ThinVec<ItemPath>,
     /// The list of all unit struct expressions paths
@@ -36,9 +45,9 @@ pub struct AST {
 #[derive(Clone)]
 pub struct PkgPath {
     /// The pkg idx where this path is located
-    pub pkg_idx: usize,
+    pub pkg_key: PkgKey,
     /// The file idx where this path is located
-    pub file_idx: usize,
+    pub file_key: FileKey,
     /// The segmentes of the path
     pub ids: ThinVec<IdKey>,
     /// The spans of the segments of the path
@@ -100,7 +109,7 @@ pub enum VisModifier {
 
 #[derive(Clone, Copy)]
 pub struct ItemInfo {
-    pub file_idx: usize,
+    pub file_key: FileKey,
     pub id_span: Span,
 }
 

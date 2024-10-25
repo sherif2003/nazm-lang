@@ -1,6 +1,7 @@
 use ast_generator::ASTGenerator;
 use error::*;
-use nazmc_data_pool::{IdKey, IdPool};
+use nazmc_ast::{FileKey, PkgKey};
+use nazmc_data_pool::{new_data_pool_key, DataPoolBuilder, IdKey};
 use nazmc_diagnostics::{
     file_info::FileInfo, fmt_diagnostics, span::SpanCursor, CodeWindow, Diagnostic,
 };
@@ -26,9 +27,8 @@ pub fn parse(
     lexer_errors: Vec<LexerError>,
     ast: &mut nazmc_ast::AST,
     name_conflicts: &mut NameConflicts,
-    lambda_implicit_param_key: IdKey,
-    pkg_idx: usize,
-    file_idx: usize,
+    pkg_key: PkgKey,
+    file_key: FileKey,
 ) -> Result<(), String> {
     let mut reporter = ParseErrorsReporter {
         file_info,
@@ -49,11 +49,10 @@ pub fn parse(
 
     if reporter.diagnostics.is_empty() {
         ASTGenerator {
-            pkg_idx,
-            file_idx,
+            pkg_key,
+            file_key,
             ast,
             name_conflicts,
-            lambda_implicit_param_key,
         }
         .lower_file(file);
 

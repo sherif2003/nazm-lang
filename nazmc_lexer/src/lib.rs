@@ -5,7 +5,7 @@ mod token;
 use documented::DocumentedVariants;
 use error::{LexerError, LexerErrorKind};
 use itertools::Itertools;
-use nazmc_data_pool::{IdPool, StrPool};
+use nazmc_data_pool::{IdPoolBuilder, StrPoolBuilder};
 use nazmc_diagnostics::span::{Span, SpanCursor};
 use std::str::Chars;
 use strum::IntoEnumIterator;
@@ -23,8 +23,8 @@ pub struct LexerIter<'a> {
     /// Errors
     errs: Vec<LexerError>,
     current_token_idx: usize,
-    id_pool: &'a mut IdPool,
-    str_pool: &'a mut StrPool,
+    id_pool: &'a mut IdPoolBuilder,
+    str_pool: &'a mut StrPoolBuilder,
 }
 
 impl<'a> Iterator for LexerIter<'a> {
@@ -52,7 +52,11 @@ impl<'a> Iterator for LexerIter<'a> {
 }
 
 impl<'a> LexerIter<'a> {
-    pub fn new(content: &'a str, id_pool: &'a mut IdPool, str_pool: &'a mut StrPool) -> Self {
+    pub fn new(
+        content: &'a str,
+        id_pool: &'a mut IdPoolBuilder,
+        str_pool: &'a mut StrPoolBuilder,
+    ) -> Self {
         let mut _self = Self {
             content,
             cursor: CharsCursor::new(content),
@@ -253,7 +257,7 @@ impl<'a> LexerIter<'a> {
                             len: 1,
                             kind: LexerErrorKind::UnclosedStr,
                         });
-                        let str_key = self.str_pool.insert("".to_string());
+                        let str_key = self.str_pool.get_key(&"".to_string());
                         return TokenKind::Literal(LiteralKind::Str(str_key));
                     };
 
@@ -271,7 +275,7 @@ impl<'a> LexerIter<'a> {
 
                 let str = self.next_valid_nazm_rust_char_in_str(chars, start.col);
 
-                let id_key = self.str_pool.insert(str);
+                let id_key = self.str_pool.get_key(&str);
 
                 TokenKind::Literal(LiteralKind::Str(id_key))
             }
@@ -379,7 +383,7 @@ impl<'a> LexerIter<'a> {
     fn next_id_or_keyword(&mut self) -> TokenKind {
         if !self.cursor.stopped_at.1.is_alphabetic() {
             let c = self.cursor.stopped_at.1;
-            let id_key = self.id_pool.insert(c.to_string());
+            let id_key = self.id_pool.get_key(&c.to_string());
             self.next_cursor();
             self.errs.push(LexerError {
                 token_idx: self.current_token_idx,
@@ -413,7 +417,7 @@ impl<'a> LexerIter<'a> {
             }
         }
 
-        let id_key = self.id_pool.insert(id.to_string());
+        let id_key = self.id_pool.get_key(&id.to_string());
 
         TokenKind::Id(id_key)
     }
