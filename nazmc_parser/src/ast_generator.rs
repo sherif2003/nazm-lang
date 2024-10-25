@@ -20,6 +20,9 @@ pub(crate) struct ASTGenerator<'a> {
 
 impl<'a> ASTGenerator<'a> {
     pub(crate) fn lower_file(&mut self, file: File) {
+        self.ast
+            .pkgs_to_items
+            .resize(usize::from(self.pkg_key) + 1, HashMap::new());
         self.lower_imports(file.imports);
         self.lower_file_items(file.content.items);
     }
@@ -120,7 +123,7 @@ impl<'a> ASTGenerator<'a> {
                     let id_span = name.span;
 
                     if self.check_if_name_conflicts(id, id_span) {
-                        return;
+                        continue;
                     }
 
                     let info = nazmc_ast::ItemInfo {
@@ -196,7 +199,7 @@ impl<'a> ASTGenerator<'a> {
                     let id_span = name.span;
 
                     if self.check_if_name_conflicts(id, id_span) {
-                        return;
+                        continue;
                     }
 
                     let info = nazmc_ast::ItemInfo {

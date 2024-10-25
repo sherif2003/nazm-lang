@@ -1,7 +1,6 @@
 use ast_generator::ASTGenerator;
 use error::*;
 use nazmc_ast::{FileKey, PkgKey};
-use nazmc_data_pool::{new_data_pool_key, DataPoolBuilder, IdKey};
 use nazmc_diagnostics::{
     file_info::FileInfo, fmt_diagnostics, span::SpanCursor, CodeWindow, Diagnostic,
 };

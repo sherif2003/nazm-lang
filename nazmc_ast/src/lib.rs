@@ -60,6 +60,7 @@ pub struct ItemPath {
     pub item: ASTId,
 }
 
+#[derive(Clone)]
 pub struct ImportStm {
     pub item_path: ItemPath,
     pub alias: ASTId,

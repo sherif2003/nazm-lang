@@ -1,6 +1,6 @@
 pub use exprs::*;
 use nazmc_data_pool::IdKey;
-pub use nazmc_diagnostics::span::Span;
+use nazmc_diagnostics::span::Span;
 pub use stms::*;
 pub use thin_vec::ThinVec;
 pub use types::*;

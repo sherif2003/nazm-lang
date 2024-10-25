@@ -4,6 +4,8 @@ use nazmc_ast::{FileKey, PkgPoolBuilder};
 use nazmc_data_pool::typed_index_collections::{ti_vec, TiVec};
 use nazmc_data_pool::{IdPoolBuilder, StrPoolBuilder};
 use nazmc_diagnostics::file_info::FileInfo;
+use nazmc_diagnostics::span::Span;
+use nazmc_diagnostics::{eprint_diagnostics, CodeWindow, Diagnostic};
 use nazmc_lexer::LexerIter;
 use nazmc_parser::parse;
 use owo_colors::OwoColorize;
@@ -115,7 +117,11 @@ fn main() {
     let mut str_pool = StrPoolBuilder::new();
     let mut pkgs = PkgPoolBuilder::new();
     let mut files_infos = TiVec::<FileKey, FileInfo>::new();
-    let mut ast = nazmc_ast::AST::default();
+    let mut ast = nazmc_ast::AST {
+        imports: ti_vec![ThinVec::new(); files_paths.len()],
+        star_imports: ti_vec![ThinVec::new(); files_paths.len()],
+        ..Default::default()
+    };
     let mut diagnostics: Vec<String> = vec![];
     let mut fail_after_parsing = false;
     let mut name_conflicts = nazmc_parser::NameConflicts::new();
@@ -168,13 +174,7 @@ fn main() {
                 file_idx.into(),
             ) {
                 Ok(_) => {
-                    // if pkg_idx >= pkgs_to_files_indexes.len() {
-                    //     pkgs_to_files_indexes.resize(pkg_idx + 1, vec![]);
-                    // }
-
                     files_infos.push(file_info);
-                    // files_asts.push(nazmc_resolve::ParsedFile { path, lines, ast });
-                    // pkgs_to_files_indexes[pkg_idx].push(file_idx);
                 }
                 Err(d) => {
                     diagnostics.push(d);
@@ -194,7 +194,38 @@ fn main() {
         exit(1)
     }
 
+    let mut diagnostics = vec![];
+    let id_pool = id_pool.build();
     let pkgs = pkgs.build();
+
+    for (pkg_key, conflicts) in name_conflicts {
+        let pkg_display_name = pkgs[pkg_key]
+            .iter()
+            .map(|name| id_pool[*name].as_str())
+            .collect::<Vec<_>>()
+            .join("::");
+
+        for (conflicting_name, files_conflicts) in conflicts {
+            let name = &id_pool[conflicting_name];
+            let msg = format!(
+                "يوجد أكثر من عنصر بنفس الاسم `{}` في نفس الحزمة `{}`",
+                name, pkg_display_name
+            );
+            let mut diagnostic = Diagnostic::error(msg, vec![]);
+            let mut occurrences = 1;
+            for (file_key, spans) in files_conflicts {
+                let file_info = &files_infos[file_key];
+                let code_window = occurrences_code_window(file_info, &mut occurrences, spans);
+                diagnostic.push_code_window(code_window);
+            }
+            diagnostics.push(diagnostic);
+        }
+    }
+
+    if !diagnostics.is_empty() {
+        eprint_diagnostics(diagnostics);
+        exit(1)
+    }
 
     // let resolver = nazmc_resolve::NameResolver::new(
     //     &id_pool,
@@ -241,4 +272,40 @@ fn main() {
 
     //     print!("{}", val);
     // }
+}
+
+fn occurrences_code_window<'a>(
+    file_info: &'a FileInfo,
+    occurrences: &mut usize,
+    mut spans: Vec<Span>,
+) -> CodeWindow<'a> {
+    let mut code_window = CodeWindow::new(file_info, spans[0].start);
+
+    nazmc_diagnostics::span::sort_spans(&mut spans);
+
+    for span in spans {
+        let occurrence_str = match *occurrences {
+            1 => "هنا تم العثور على أول عنصر بهذا الاسم".to_string(),
+            2 => "هنا تم العثور على نفس الاسم للمرة الثانية".to_string(),
+            3 => "هنا تم العثور على نفس الاسم للمرة الثالثة".to_string(),
+            4 => "هنا تم العثور على نفس الاسم للمرة الرابعة".to_string(),
+            5 => "هنا تم العثور على نفس الاسم للمرة الخامسة".to_string(),
+            6 => "هنا تم العثور على نفس الاسم للمرة السادسة".to_string(),
+            7 => "هنا تم العثور على نفس الاسم للمرة السابعة".to_string(),
+            8 => "هنا تم العثور على نفس الاسم للمرة الثامنة".to_string(),
+            9 => "هنا تم العثور على نفس الاسم للمرة التاسعة".to_string(),
+            10 => "هنا تم العثور على نفس الاسم للمرة العاشرة".to_string(),
+            o => format!("هنا تم العثور على نفس الاسم للمرة {}", o),
+        };
+
+        if *occurrences == 1 {
+            code_window.mark_error(span, vec![occurrence_str]);
+        } else {
+            code_window.mark_secondary(span, vec![occurrence_str]);
+        }
+
+        *occurrences += 1;
+    }
+
+    code_window
 }
