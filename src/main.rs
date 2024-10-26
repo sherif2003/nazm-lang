@@ -1,6 +1,6 @@
 mod cli;
 use cli::print_err;
-use nazmc_ast::{FileKey, PkgKey, PkgPoolBuilder};
+use nazmc_ast::{FileKey, Item, PkgKey, PkgPoolBuilder};
 use nazmc_data_pool::typed_index_collections::{ti_vec, TiVec};
 use nazmc_data_pool::{IdPoolBuilder, StrPoolBuilder};
 use nazmc_diagnostics::file_info::FileInfo;
@@ -8,6 +8,7 @@ use nazmc_diagnostics::span::Span;
 use nazmc_diagnostics::{eprint_diagnostics, CodeWindow, Diagnostic};
 use nazmc_lexer::LexerIter;
 use nazmc_parser::parse;
+use nazmc_resolve::NameResolver;
 use owo_colors::OwoColorize;
 use serde::Deserialize;
 use serde_yaml::Value;
@@ -113,10 +114,11 @@ fn main() {
     io::stderr().write_all(output).unwrap();
 
     let files_paths = get_file_paths();
-    let files_paths_len = files_paths.len();
+    let files_len = files_paths.len();
     let mut id_pool = IdPoolBuilder::new();
     let mut str_pool = StrPoolBuilder::new();
     let mut pkgs = PkgPoolBuilder::new();
+    let top_pkg_key = pkgs.get_key(&ThinVec::new());
 
     // Register the unit type name to index 0
     // main fn id to index 1
@@ -154,15 +156,28 @@ fn main() {
         })
         .collect::<Vec<_>>();
 
-    let pkgs = pkgs.build();
+    let pkgs_len = pkgs.map.len();
 
-    let mut ast = nazmc_ast::AST {
-        pkgs_to_items: ti_vec![HashMap::new(); pkgs.len()],
-        imports: ti_vec![ThinVec::new(); files_paths_len],
-        star_imports: ti_vec![ThinVec::new(); files_paths_len],
-        ..Default::default()
-    };
+    let mut ast = nazmc_ast::AST::new(pkgs_len, files_len);
+
+    pkgs.map.keys().for_each(|ids| {
+        if ids.is_empty() {
+            return;
+        }
+
+        let Some(pkg_key_usize) = pkgs.map.get(&ids[..&ids.len() - 1]) else {
+            return;
+        };
+
+        let pkg_key: PkgKey = (*pkg_key_usize).into();
+
+        ast.state.pkgs_to_items[pkg_key].insert(*ids.last().unwrap(), Item::new(Item::PKG, 0, 0));
+    });
+
+    let pkgs_names = pkgs.build_ref();
+
     let mut ast_validator = nazmc_parser::ASTValidator::new(&mut ast);
+
     let mut files_infos = TiVec::<FileKey, FileInfo>::new();
     let mut diagnostics: Vec<String> = vec![];
     let mut fail_after_parsing = false;
@@ -209,7 +224,9 @@ fn main() {
 
     let id_pool = id_pool.build();
 
-    ast_validator.validate(&pkgs, &files_infos, &id_pool);
+    ast_validator.validate(&pkgs_names, &files_infos, &id_pool);
+
+    NameResolver::new(&files_infos, &id_pool, &pkgs.map, &pkgs_names, ast).resolve();
 
     // let resolver = nazmc_resolve::NameResolver::new(
     //     &id_pool,

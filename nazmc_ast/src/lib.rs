@@ -1,7 +1,9 @@
 use derive_more::{From, Into};
 pub use item::Item;
 use nazmc_data_pool::{
-    new_data_pool_key, typed_index_collections::TiVec, DataPoolBuilder, IdKey, StrKey,
+    new_data_pool_key,
+    typed_index_collections::{ti_vec, TiVec},
+    DataPoolBuilder, IdKey, StrKey,
 };
 use nazmc_diagnostics::span::{Span, SpanCursor};
 use std::collections::HashMap;
@@ -9,29 +11,45 @@ use thin_vec::ThinVec;
 mod item;
 
 new_data_pool_key! { FileKey }
-
 new_data_pool_key! { PkgKey }
+new_data_pool_key! { TypePathKey }
+new_data_pool_key! { UnitStructPathKey }
+new_data_pool_key! { TupleStructPathKey }
+new_data_pool_key! { FieldsStructPathKey }
+new_data_pool_key! { GeneralPathKey }
+
+new_data_pool_key! { UnitStructKey }
+new_data_pool_key! { TupleStructKey }
+new_data_pool_key! { FieldsStructKey }
 
 pub type PkgPoolBuilder = DataPoolBuilder<PkgKey, ThinVec<IdKey>>;
 
 #[derive(Default)]
-pub struct AST {
+pub struct Unresolved {
     /// The list of maps of items names and their kind, visibility and index
     pub pkgs_to_items: TiVec<PkgKey, HashMap<IdKey, Item>>,
-    /// The list of imports stms for each file
-    pub imports: TiVec<FileKey, ThinVec<ImportStm>>,
-    /// The list of star imports for each file
-    pub star_imports: TiVec<FileKey, ThinVec<PkgPath>>,
+    /// All paths that should be resolved
+    pub paths: ASTPaths,
+}
+
+/// Holds resolved paths
+pub struct Resolved {
     /// The list of all types paths
-    pub types_paths: ThinVec<ItemPath>,
+    pub types_paths: TiVec<TypePathKey, Item>,
     /// The list of all unit struct expressions paths
-    pub unit_structs_paths_exprs: ThinVec<ItemPath>,
+    pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, UnitStructKey>,
     /// The list of all tuple struct expressions paths
-    pub tuple_structs_paths_exprs: ThinVec<ItemPath>,
+    pub tuple_structs_paths_exprs: TiVec<TupleStructPathKey, TupleStructKey>,
     /// The list of all fields struct expressions paths
-    pub field_structs_paths_exprs: ThinVec<ItemPath>,
+    pub field_structs_paths_exprs: TiVec<FieldsStructPathKey, FieldsStructKey>,
     /// The list of all paths expressions
-    pub paths_exprs: ThinVec<ItemPath>,
+    pub paths_exprs: TiVec<GeneralPathKey, Item>,
+}
+
+#[derive(Default)]
+pub struct AST<S> {
+    /// The state of AST: may be `Unresolved` or `Resolved`
+    pub state: S,
     /// All unit structs
     pub unit_structs: ThinVec<UnitStruct>,
     /// All tuple structs
@@ -40,6 +58,42 @@ pub struct AST {
     pub fields_structs: ThinVec<FieldsStruct>,
     /// All fns
     pub fns: ThinVec<Fn>,
+}
+
+impl AST<Unresolved> {
+    pub fn new(pkgs_len: usize, files_len: usize) -> Self {
+        let state = Unresolved {
+            pkgs_to_items: ti_vec![HashMap::new(); pkgs_len],
+            paths: ASTPaths {
+                imports: ti_vec![ThinVec::new(); files_len],
+                star_imports: ti_vec![ThinVec::new(); files_len],
+                ..Default::default()
+            },
+        };
+
+        Self {
+            state,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct ASTPaths {
+    /// The list of imports stms for each file
+    pub imports: TiVec<FileKey, ThinVec<ImportStm>>,
+    /// The list of star imports for each file
+    pub star_imports: TiVec<FileKey, ThinVec<PkgPath>>,
+    /// The list of all types paths
+    pub types_paths: TiVec<TypePathKey, ItemPath>,
+    /// The list of all unit struct expressions paths
+    pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, ItemPath>,
+    /// The list of all tuple struct expressions paths
+    pub tuple_structs_paths_exprs: TiVec<TupleStructPathKey, ItemPath>,
+    /// The list of all fields struct expressions paths
+    pub field_structs_paths_exprs: TiVec<FieldsStructPathKey, ItemPath>,
+    /// The list of all paths expressions
+    pub paths_exprs: TiVec<GeneralPathKey, ItemPath>,
 }
 
 #[derive(Clone)]
@@ -87,8 +141,7 @@ pub enum BindingKind {
 
 #[derive(Clone)]
 pub enum Type {
-    /// Holds the ItemPath index in `AST::types_paths`
-    Path(usize),
+    Path(TypePathKey),
     Unit(Span),
     Tuple(ThinVec<Type>, Span),
     Paren(Box<Type>, Span),
@@ -176,11 +229,9 @@ pub struct Expr {
 pub enum ExprKind {
     Literal(LiteralExpr),
     Parens(Box<Expr>),
-    /// Holds the ItemPath index
-    Path(usize),
+    Path(GeneralPathKey),
     Call(Box<CallExpr>),
-    /// Holds the ItemPath index
-    UnitStruct(usize),
+    UnitStruct(UnitStructPathKey),
     TupleStruct(Box<TupleStructExpr>),
     FieldsStruct(Box<FieldsStructExpr>),
     Field(Box<FieldExpr>),
@@ -234,13 +285,13 @@ pub struct CallExpr {
 
 #[derive(Clone)]
 pub struct TupleStructExpr {
-    pub item_path_idx: usize,
+    pub path_key: TupleStructPathKey,
     pub args: ThinVec<Expr>,
 }
 
 #[derive(Clone)]
 pub struct FieldsStructExpr {
-    pub item_path_idx: usize,
+    pub path_key: FieldsStructPathKey,
     pub fields: ThinVec<(ASTId, Expr)>,
 }
 

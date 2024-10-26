@@ -35,7 +35,7 @@ type ItemsAndImportsConflictsInFiles = HashMap<(IdKey, FileKey), Vec<Span>>;
 pub struct ASTValidator<'a> {
     pub(crate) pkg_key: PkgKey,
     pub(crate) file_key: FileKey,
-    pub(crate) ast: &'a mut nazmc_ast::AST,
+    pub(crate) ast: &'a mut nazmc_ast::AST<nazmc_ast::Unresolved>,
     pub(crate) items_names_in_current_file: HashMap<IdKey, Span>,
     pub(crate) params_names_in_current_fn: HashMap<IdKey, Span>,
     pub(crate) items_conflicts_in_pkgs: ItemsConflictsInPkgs,
@@ -45,7 +45,7 @@ pub struct ASTValidator<'a> {
 }
 
 impl<'a> ASTValidator<'a> {
-    pub fn new(ast: &'a mut nazmc_ast::AST) -> Self {
+    pub fn new(ast: &'a mut nazmc_ast::AST<nazmc_ast::Unresolved>) -> Self {
         Self {
             ast,
             pkg_key: Default::default(),
@@ -112,7 +112,7 @@ impl<'a> ASTValidator<'a> {
             }
 
             if import_all {
-                self.ast.star_imports[self.file_key].push(pkg_path);
+                self.ast.state.paths.star_imports[self.file_key].push(pkg_path);
             } else {
                 let item_id = pkg_path.ids.pop().unwrap();
                 let item_span = pkg_path.spans.pop().unwrap();
@@ -135,7 +135,7 @@ impl<'a> ASTValidator<'a> {
                         .push(alias.span);
                 }
 
-                self.ast.imports[self.file_key].push(nazmc_ast::ImportStm {
+                self.ast.state.paths.imports[self.file_key].push(nazmc_ast::ImportStm {
                     item_path: nazmc_ast::ItemPath { pkg_path, item },
                     alias,
                 });
@@ -186,7 +186,7 @@ impl<'a> ASTValidator<'a> {
                             let idx = self.ast.unit_structs.len();
                             let item = nazmc_ast::Item::new(kind, vis, idx);
                             self.ast.unit_structs.push(nazmc_ast::UnitStruct { info });
-                            self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
+                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                         StructKind::Tuple(tuple_struct_fields) => {
                             let mut types = ThinVec::new();
@@ -212,7 +212,7 @@ impl<'a> ASTValidator<'a> {
                             self.ast
                                 .tuple_structs
                                 .push(nazmc_ast::TupleStruct { info, types });
-                            self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
+                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                         StructKind::Fields(struct_fields) => {
                             let mut fields = HashMap::new();
@@ -246,7 +246,7 @@ impl<'a> ASTValidator<'a> {
                             self.ast
                                 .fields_structs
                                 .push(nazmc_ast::FieldsStruct { info, fields });
-                            self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
+                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                     }
                 }
@@ -314,14 +314,14 @@ impl<'a> ASTValidator<'a> {
                         return_type,
                         body,
                     });
-                    self.ast.pkgs_to_items[self.pkg_key].insert(id, item);
+                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                 }
             }
         }
     }
 
     fn check_if_name_conflicts(&mut self, id: IdKey, id_span: Span) -> bool {
-        let Some(item_with_same_id) = self.ast.pkgs_to_items[self.pkg_key].get(&id) else {
+        let Some(item_with_same_id) = self.ast.state.pkgs_to_items[self.pkg_key].get(&id) else {
             return false;
         };
 
@@ -418,9 +418,8 @@ impl<'a> ASTValidator<'a> {
         match typ {
             Type::Path(simple_path) => {
                 let item_path = self.lower_simple_path(simple_path);
-                let item_path_idx = self.ast.types_paths.len();
-                self.ast.types_paths.push(item_path);
-                nazmc_ast::Type::Path(item_path_idx)
+                let type_path_key = self.ast.state.paths.types_paths.push_and_get_key(item_path);
+                nazmc_ast::Type::Path(type_path_key)
             }
             Type::Ptr(ptr_type) => {
                 let underlying_typ = Box::new(self.lower_type(ptr_type.typ.unwrap()));
@@ -478,8 +477,8 @@ impl<'a> ASTValidator<'a> {
                     let return_type = Box::new(self.lower_type(lambda_type.typ.unwrap()));
 
                     let span = match return_type.as_ref() {
-                        nazmc_ast::Type::Path(item_path_idx) => {
-                            self.ast.paths_exprs[*item_path_idx].item.span
+                        nazmc_ast::Type::Path(type_path_key) => {
+                            self.ast.state.paths.types_paths[*type_path_key].item.span
                         }
                         nazmc_ast::Type::Unit(span) => *span,
                         nazmc_ast::Type::Tuple(_, span) => *span,
@@ -937,13 +936,11 @@ impl<'a> ASTValidator<'a> {
                         .merged_with(&item_path.item.span)
                 };
 
-                let item_path_idx = self.ast.paths_exprs.len();
-
-                self.ast.paths_exprs.push(item_path);
+                let path_key = self.ast.state.paths.paths_exprs.push_and_get_key(item_path);
 
                 nazmc_ast::Expr {
                     span,
-                    kind: nazmc_ast::ExprKind::Path(item_path_idx),
+                    kind: nazmc_ast::ExprKind::Path(path_key),
                 }
             }
             AtomicExpr::Literal(lit) => {
@@ -1125,14 +1122,18 @@ impl<'a> ASTValidator<'a> {
                 }
             }
 
-            let item_path_idx = self.ast.tuple_structs_paths_exprs.len();
+            let tuple_struct_path_key = self
+                .ast
+                .state
+                .paths
+                .tuple_structs_paths_exprs
+                .push_and_get_key(item_path);
 
-            self.ast.tuple_structs_paths_exprs.push(item_path);
-
-            let tuple_struct = Box::new(nazmc_ast::TupleStructExpr {
-                item_path_idx,
-                args,
-            });
+            let tuple_struct: Box<nazmc_ast::TupleStructExpr> =
+                Box::new(nazmc_ast::TupleStructExpr {
+                    path_key: tuple_struct_path_key,
+                    args,
+                });
 
             nazmc_ast::Expr {
                 span,
@@ -1159,12 +1160,15 @@ impl<'a> ASTValidator<'a> {
                 }
             }
 
-            let item_path_idx = self.ast.field_structs_paths_exprs.len();
-
-            self.ast.field_structs_paths_exprs.push(item_path);
+            let fields_struct_path_key = self
+                .ast
+                .state
+                .paths
+                .field_structs_paths_exprs
+                .push_and_get_key(item_path);
 
             let fields_struct = Box::new(nazmc_ast::FieldsStructExpr {
-                item_path_idx,
+                path_key: fields_struct_path_key,
                 fields,
             });
 
@@ -1175,13 +1179,16 @@ impl<'a> ASTValidator<'a> {
         } else {
             let span = struct_expr.dot.span.merged_with(&item_path.item.span);
 
-            let item_path_idx = self.ast.unit_structs_paths_exprs.len();
-
-            self.ast.unit_structs_paths_exprs.push(item_path);
+            let unit_struct_path_key = self
+                .ast
+                .state
+                .paths
+                .unit_structs_paths_exprs
+                .push_and_get_key(item_path);
 
             nazmc_ast::Expr {
                 span,
-                kind: nazmc_ast::ExprKind::UnitStruct(item_path_idx),
+                kind: nazmc_ast::ExprKind::UnitStruct(unit_struct_path_key),
             }
         }
     }
@@ -1205,15 +1212,13 @@ impl<'a> ASTValidator<'a> {
                 id: name.id,
             };
 
-            let item_path_idx = self.ast.paths_exprs.len();
+            let item_path = nazmc_ast::ItemPath { pkg_path, item };
 
-            self.ast
-                .paths_exprs
-                .push(nazmc_ast::ItemPath { pkg_path, item });
+            let path_key = self.ast.state.paths.paths_exprs.push_and_get_key(item_path);
 
             nazmc_ast::Expr {
                 span: name.span,
-                kind: nazmc_ast::ExprKind::Path(item_path_idx),
+                kind: nazmc_ast::ExprKind::Path(path_key),
             }
         };
 
@@ -1296,7 +1301,7 @@ impl<'a> ASTValidator<'a> {
 
     pub fn validate(
         self,
-        pkgs: &TiSlice<PkgKey, ThinVec<IdKey>>,
+        pkgs: &TiSlice<PkgKey, &ThinVec<IdKey>>,
         files_infos: &TiSlice<FileKey, FileInfo>,
         id_pool: &TiSlice<IdKey, String>,
     ) {

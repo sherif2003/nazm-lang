@@ -24,7 +24,7 @@ where
     K: From<usize> + Into<usize>,
     V: Eq + Hash + Clone,
 {
-    map: HashMap<V, usize>,
+    pub map: HashMap<V, usize>,
     phantom_data: PhantomData<K>,
 }
 
@@ -61,6 +61,26 @@ where
         for (val, index) in self.map {
             unsafe {
                 ptr.add(index).write(val);
+            }
+        }
+
+        unsafe {
+            data.set_len(len);
+        }
+
+        data
+    }
+
+    pub fn build_ref(&self) -> TiVec<K, &V> {
+        let len = self.map.len();
+
+        let mut data = TiVec::with_capacity(len);
+
+        let ptr: *mut &V = data.as_mut_ptr();
+
+        for (val, index) in &self.map {
+            unsafe {
+                ptr.add(*index).write(val);
             }
         }
 

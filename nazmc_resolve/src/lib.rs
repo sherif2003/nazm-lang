@@ -1,3 +1,367 @@
+use std::{collections::HashMap, process::exit};
+
+use nazmc_ast::{
+    ASTId, ASTPaths, FileKey, Item, ItemInfo, ItemPath, PkgKey, PkgPath, UnitStructKey,
+    UnitStructPathKey, Unresolved, AST,
+};
+use nazmc_data_pool::{
+    typed_index_collections::{ti_vec, TiSlice, TiVec},
+    IdKey,
+};
+use nazmc_diagnostics::{
+    eprint_diagnostics, file_info::FileInfo, span::Span, CodeWindow, Diagnostic,
+};
+use thin_vec::ThinVec;
+
+pub fn resolve(ast: nazmc_ast::AST<nazmc_ast::Unresolved>) -> nazmc_ast::AST<nazmc_ast::Resolved> {
+    todo!()
+}
+
+pub struct NameResolver<'a> {
+    files_infos: &'a TiSlice<FileKey, FileInfo>,
+    id_pool: &'a TiSlice<IdKey, String>,
+    pkgs: &'a HashMap<ThinVec<IdKey>, usize>,
+    pkgs_names: &'a TiSlice<PkgKey, &'a ThinVec<IdKey>>,
+    ast: nazmc_ast::AST<nazmc_ast::Unresolved>,
+    diagnostics: Vec<Diagnostic<'a>>,
+    // unresolved_pkgs_paths: Vec<(FileKey, ASTId)>,
+    // unresolved_items_paths: Vec<(FileKey, ASTId)>,
+    // wrong_items_found: Vec<WrongItemFoundErr>,
+    // pkgs_cannot_be_imported: Vec<(FileKey, Span)>,
+    // unaccessable_item_errs: Vec<UnaccessableItemErr>,
+}
+
+struct UnaccessableItemErr {
+    imported_at: FileKey,
+    imported_span: Span,
+    found_item_info: ItemInfo,
+}
+
+struct WrongItemFoundErr {
+    file_key: FileKey,
+    span: Span,
+    item_kind: u64,
+    expected_kind: u64,
+}
+
+struct ResolvedImport {
+    alias_span: Span,
+    resolved_item: Item,
+}
+
+impl<'a> NameResolver<'a> {
+    pub fn new(
+        files_infos: &'a TiSlice<FileKey, FileInfo>,
+        id_pool: &'a TiSlice<IdKey, String>,
+        pkgs: &'a HashMap<ThinVec<IdKey>, usize>,
+        pkgs_names: &'a TiSlice<PkgKey, &'a ThinVec<IdKey>>,
+        ast: nazmc_ast::AST<nazmc_ast::Unresolved>,
+    ) -> Self {
+        Self {
+            files_infos,
+            id_pool,
+            pkgs,
+            pkgs_names,
+            ast,
+            diagnostics: vec![],
+        }
+    }
+
+    pub fn resolve(mut self) -> nazmc_ast::AST<nazmc_ast::Resolved> {
+        let paths = std::mem::take(&mut self.ast.state.paths);
+
+        let resolved_imports = paths
+            .imports
+            .into_iter_enumerated()
+            .map(|(file_key, file_imports)| {
+                file_imports
+                    .into_iter()
+                    .map(|import| {
+                        let resolved_item =
+                            self.resolve_non_pkg_item_path(file_key, import.item_path);
+                        (
+                            import.alias.id,
+                            ResolvedImport {
+                                alias_span: import.alias.span,
+                                resolved_item,
+                            },
+                        )
+                    })
+                    .collect()
+            })
+            .collect::<TiVec<FileKey, HashMap<_, _>>>();
+
+        if !self.diagnostics.is_empty() {
+            eprint_diagnostics(self.diagnostics);
+            exit(1);
+        }
+
+        // let resolved_unit_structs_paths_exprs = paths
+        //     .unit_structs_paths_exprs
+        //     .into_iter()
+        //     .map(|item_path| {
+        //         let item = self.resolve_item_path(item_path);
+        //         self.check_resolved_item_kind(Item::UNIT_STRUCT, item);
+        //         item
+        //     })
+        //     .collect::<TiVec<UnitStructPathKey, Item>>();
+
+        todo!()
+    }
+
+    fn resolve_non_pkg_item_path(&mut self, at: FileKey, item_path: ItemPath) -> Item {
+        let item_id = item_path.item.id;
+
+        let at_span = item_path
+            .pkg_path
+            .spans
+            .first()
+            .unwrap_or(&item_path.item.span)
+            .merged_with(&item_path.item.span);
+
+        let resolved_item = self.resolve_item_path(item_path);
+
+        if resolved_item.kind() == Item::PKG {
+            self.add_pkgs_cannot_be_imported_err(at, at_span);
+            Item::default()
+        } else if resolved_item.visibility() == Item::DEFAULT {
+            self.add_encapsulation_err(at, at_span, resolved_item, item_id);
+            Item::default()
+        } else {
+            resolved_item
+        }
+    }
+
+    fn resolve_item_path(
+        &mut self,
+        ItemPath {
+            pkg_path,
+            item: item_ast_id,
+        }: ItemPath,
+    ) -> Item {
+        match self.ast.state.pkgs_to_items.get(pkg_path.pkg_key) {
+            Some(items) => {
+                if let Some(item) = items.get(&item_ast_id.id) {
+                    *item
+                } else {
+                    self.add_unresolved_name_err(
+                        pkg_path.file_key,
+                        item_ast_id.span,
+                        item_ast_id.id,
+                    );
+                    Item::default()
+                }
+            }
+            None => {
+                self.add_unresolved_name_pkg_path_err(pkg_path);
+                Item::default()
+            }
+        }
+    }
+
+    fn check_resolved_item_kind(
+        &mut self,
+        at: FileKey,
+        at_span: Span,
+        expected_kind: u64,
+        item: Item,
+    ) {
+        let item_kind = item.kind();
+
+        if item_kind == expected_kind {
+            return;
+        }
+
+        let expected_kind_str = item_kind_to_str(expected_kind);
+        let found_kind_str = item_kind_to_str(item_kind);
+
+        let msg = format!(
+            "يُتوقع {} ولكن تم العثور على {}",
+            expected_kind_str, found_kind_str
+        );
+
+        let file_info = &self.files_infos[at];
+        let mut code_window = CodeWindow::new(file_info, at_span.start);
+        code_window.mark_error(at_span, vec![]);
+
+        let help = self.help_diagnostic_to_find_item(item);
+
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+        diagnostic.chain(help);
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn add_unresolved_name_err(&mut self, at: FileKey, at_span: Span, id: IdKey) {
+        let file_info = &self.files_infos[at];
+        let name = &self.id_pool[id];
+        let msg = format!("لم يتم العثور على الاسم `{}` في المسار", name);
+
+        let mut code_window = CodeWindow::new(file_info, at_span.start);
+
+        code_window.mark_error(
+            at_span,
+            vec!["هذا الاسم غير موجود داخل المسار المحدد".to_string()],
+        );
+
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+        let mut possible_paths = vec![];
+
+        for (pkg_key, pkg_to_items) in self.ast.state.pkgs_to_items.iter_enumerated() {
+            if let Some(found_item) = pkg_to_items.get(&id) {
+                let item_info = self.get_item_info(*found_item);
+                let item_file = &self.files_infos[item_info.file_key];
+                let item_span_cursor = item_info.id_span.start;
+                let item_kind_str = item_kind_to_str(found_item.kind());
+                let pkg_name = self.fmt_pkg_name(pkg_key);
+                let name = &self.id_pool[id];
+                let item_path = format!(
+                    "{}:{}:{}",
+                    &item_file.path,
+                    item_span_cursor.line + 1,
+                    item_span_cursor.col + 1
+                );
+                let path = format!(
+                    "\t- {} {}::{} في {}",
+                    item_kind_str, pkg_name, name, item_path
+                );
+
+                possible_paths.push(path);
+            }
+        }
+
+        if !possible_paths.is_empty() {
+            let mut help = Diagnostic::help(
+                format!("تم العثور على عناصر مشابهة بنفس الاسم في المسارات التالية:"),
+                vec![],
+            );
+
+            for t in possible_paths {
+                help.chain_free_text(t);
+            }
+
+            diagnostic.chain(help);
+        }
+
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn add_unresolved_name_pkg_path_err(
+        &mut self,
+        PkgPath {
+            pkg_key: _,
+            file_key,
+            mut ids,
+            mut spans,
+        }: PkgPath,
+    ) {
+        while let Some(first_invalid_seg_id) = ids.pop() {
+            let first_invalid_seg_span = spans.pop().unwrap();
+
+            if self.pkgs.contains_key(&ids) {
+                self.add_unresolved_name_err(
+                    file_key,
+                    first_invalid_seg_span,
+                    first_invalid_seg_id,
+                );
+            }
+        }
+    }
+
+    fn add_encapsulation_err(
+        &mut self,
+        at: FileKey,
+        at_span: Span,
+        resolved_item: Item,
+        name: IdKey,
+    ) {
+        let file_info = &self.files_infos[at];
+        let name = &self.id_pool[name];
+        let item_kind = resolved_item.kind();
+        let msg = match item_kind {
+            Item::UNIT_STRUCT | Item::TUPLE_STRUCT | Item::FIELDS_STRUCT => {
+                format!(
+                    "لا يمكن الوصول إلى هيكل `{}` لأنه خاص بالحزمة التابع لها",
+                    name
+                )
+            }
+            Item::FN => format!(
+                "لا يمكن الوصول إلى دالة `{}` لأنها خاصة بالحزمة التابعة لها",
+                name
+            ),
+            _ => {
+                unreachable!()
+            }
+        };
+
+        let mut code_window = CodeWindow::new(file_info, at_span.start);
+        code_window.mark_error(at_span, vec![]);
+        let help = self.help_diagnostic_to_find_item(resolved_item);
+
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+        diagnostic.chain(help);
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn add_pkgs_cannot_be_imported_err(&mut self, at: FileKey, at_span: Span) {
+        let file_info = &self.files_infos[at];
+        let msg = format!("الحزم لا يمكن إستيرادها");
+        let mut code_window = CodeWindow::new(file_info, at_span.start);
+        code_window.mark_error(
+            at_span,
+            vec!["يجب أن يؤول المسار إلى عنصر (دالة أو هيكل) وليس حزمة".to_string()],
+        );
+        let diagnostic = Diagnostic::error(msg, vec![code_window]);
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn help_diagnostic_to_find_item(&self, item: Item) -> Diagnostic<'a> {
+        let item_kind = item.kind();
+        let item_kind_str = item_kind_to_str(item_kind);
+        let help_msg = format!("تم العثور على ال{} هنا", item_kind_str);
+        let resolved_item_info = self.get_item_info(item);
+        let file_of_resolved_item = &self.files_infos[resolved_item_info.file_key];
+        let mut help_code_window =
+            CodeWindow::new(file_of_resolved_item, resolved_item_info.id_span.start);
+        help_code_window.mark_help(resolved_item_info.id_span, vec![]);
+        Diagnostic::note(help_msg, vec![help_code_window])
+    }
+
+    fn get_item_info(&self, item: Item) -> ItemInfo {
+        // FIXME: index is 0 and len is 0
+        let idx = item.index();
+        match item.kind() {
+            Item::UNIT_STRUCT => self.ast.unit_structs[idx].info,
+            Item::TUPLE_STRUCT => self.ast.tuple_structs[idx].info,
+            Item::FIELDS_STRUCT => self.ast.fields_structs[idx].info,
+            Item::FN => self.ast.fns[idx].info,
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
+    fn fmt_pkg_name(&self, pkg_key: PkgKey) -> String {
+        self.pkgs_names[pkg_key]
+            .iter()
+            .map(|id| self.id_pool[*id].as_str())
+            .collect::<Vec<_>>()
+            .join("::")
+    }
+}
+
+#[inline]
+fn item_kind_to_str(kind: u64) -> &'static str {
+    match kind {
+        Item::PKG => "حزمة",
+        Item::UNIT_STRUCT | Item::TUPLE_STRUCT | Item::FIELDS_STRUCT => "هيكل",
+        Item::FN => "دالة",
+        _ => {
+            unreachable!()
+        }
+    }
+}
+
 // use nazmc_data_pool::{Built, DataPool, PoolIdx};
 // use nazmc_diagnostics::{eprint_diagnostics, span::Span, CodeWindow, Diagnostic};
 // use std::{collections::HashMap, process::exit};
@@ -414,7 +778,7 @@
 //         );
 //         help_code_window.mark_note(resolved_item_ast.name.span, vec![]);
 //         let help = Diagnostic::note(help_msg, vec![help_code_window]);
-//         diagnostic.chain(help);
+//         diagnostic.chain(help);kind
 
 //         self.diagnostics.push(diagnostic);
 //     }
@@ -494,16 +858,6 @@
 //             .map(|id| &self.id_pool[*id])
 //             .collect::<Vec<_>>()
 //             .join("::")
-//     }
-// }
-
-// #[inline]
-// fn item_kind_to_str(kind: &nazmc_ast::ItemKind) -> &'static str {
-//     match kind {
-//         nazmc_ast::ItemKind::UnitStruct
-//         | nazmc_ast::ItemKind::TupleStruct(_)
-//         | nazmc_ast::ItemKind::FieldsStruct(_) => "الهيكل",
-//         nazmc_ast::ItemKind::Fn(_) => "الدالة",
 //     }
 // }
 
