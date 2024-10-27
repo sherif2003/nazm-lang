@@ -49,6 +49,11 @@ struct ResolvedImport {
     resolved_item: Item,
 }
 
+struct ResolvedStarImport {
+    pkg_path_span: Span,
+    resolved_pkg_key: PkgKey,
+}
+
 impl<'a> NameResolver<'a> {
     pub fn new(
         files_infos: &'a TiSlice<FileKey, FileInfo>,
@@ -77,8 +82,9 @@ impl<'a> NameResolver<'a> {
                 file_imports
                     .into_iter()
                     .map(|import| {
-                        let resolved_item =
-                            self.resolve_non_pkg_item_path(file_key, import.item_path);
+                        let resolved_item = self
+                            .resolve_non_pkg_item_path(file_key, import.item_path)
+                            .unwrap_or_default();
                         (
                             import.alias.id,
                             ResolvedImport {
@@ -90,6 +96,30 @@ impl<'a> NameResolver<'a> {
                     .collect()
             })
             .collect::<TiVec<FileKey, HashMap<_, _>>>();
+
+        let resolved_star_imports = paths
+            .star_imports
+            .into_iter()
+            .map(|pkgs_paths| {
+                pkgs_paths
+                    .into_iter()
+                    .map(|pkg_path| {
+                        let span = pkg_path
+                            .spans
+                            .first()
+                            .unwrap()
+                            .merged_with(&pkg_path.spans.last().unwrap());
+
+                        let resolved_pkg_key = self.resolve_pkg_path(pkg_path).unwrap_or_default();
+
+                        ResolvedStarImport {
+                            pkg_path_span: span,
+                            resolved_pkg_key,
+                        }
+                    })
+                    .collect()
+            })
+            .collect::<TiVec<FileKey, ThinVec<_>>>();
 
         if !self.diagnostics.is_empty() {
             eprint_diagnostics(self.diagnostics);
@@ -109,7 +139,7 @@ impl<'a> NameResolver<'a> {
         todo!()
     }
 
-    fn resolve_non_pkg_item_path(&mut self, at: FileKey, item_path: ItemPath) -> Item {
+    fn resolve_non_pkg_item_path(&mut self, at: FileKey, item_path: ItemPath) -> Option<Item> {
         let item_id = item_path.item.id;
 
         let at_span = item_path
@@ -119,16 +149,16 @@ impl<'a> NameResolver<'a> {
             .unwrap_or(&item_path.item.span)
             .merged_with(&item_path.item.span);
 
-        let resolved_item = self.resolve_item_path(item_path);
+        let resolved_item = self.resolve_item_path(item_path)?;
 
         if resolved_item.kind() == Item::PKG {
             self.add_pkgs_cannot_be_imported_err(at, at_span);
-            Item::default()
+            None
         } else if resolved_item.visibility() == Item::DEFAULT {
             self.add_encapsulation_err(at, at_span, resolved_item, item_id);
-            Item::default()
+            None
         } else {
-            resolved_item
+            Some(resolved_item)
         }
     }
 
@@ -138,23 +168,25 @@ impl<'a> NameResolver<'a> {
             pkg_path,
             item: item_ast_id,
         }: ItemPath,
-    ) -> Item {
-        match self.ast.state.pkgs_to_items.get(pkg_path.pkg_key) {
-            Some(items) => {
-                if let Some(item) = items.get(&item_ast_id.id) {
-                    *item
-                } else {
-                    self.add_unresolved_name_err(
-                        pkg_path.file_key,
-                        item_ast_id.span,
-                        item_ast_id.id,
-                    );
-                    Item::default()
-                }
-            }
+    ) -> Option<Item> {
+        let file_key = pkg_path.file_key;
+
+        let item_pkg_key = self.resolve_pkg_path(pkg_path)?;
+
+        if let Some(item) = self.ast.state.pkgs_to_items[item_pkg_key].get(&item_ast_id.id) {
+            Some(*item)
+        } else {
+            self.add_unresolved_name_err(file_key, item_ast_id.span, item_ast_id.id);
+            None
+        }
+    }
+
+    fn resolve_pkg_path(&mut self, pkg_path: PkgPath) -> Option<PkgKey> {
+        match self.pkgs.get(&pkg_path.ids) {
+            Some(item_pkg_key) => Some((*item_pkg_key).into()),
             None => {
                 self.add_unresolved_name_pkg_path_err(pkg_path);
-                Item::default()
+                None
             }
         }
     }
@@ -209,6 +241,9 @@ impl<'a> NameResolver<'a> {
 
         for (pkg_key, pkg_to_items) in self.ast.state.pkgs_to_items.iter_enumerated() {
             if let Some(found_item) = pkg_to_items.get(&id) {
+                if found_item.kind() == Item::PKG {
+                    continue;
+                }
                 let item_info = self.get_item_info(*found_item);
                 let item_file = &self.files_infos[item_info.file_key];
                 let item_span_cursor = item_info.id_span.start;
@@ -264,6 +299,7 @@ impl<'a> NameResolver<'a> {
                     first_invalid_seg_span,
                     first_invalid_seg_id,
                 );
+                return;
             }
         }
     }
@@ -324,7 +360,7 @@ impl<'a> NameResolver<'a> {
         let mut help_code_window =
             CodeWindow::new(file_of_resolved_item, resolved_item_info.id_span.start);
         help_code_window.mark_help(resolved_item_info.id_span, vec![]);
-        Diagnostic::note(help_msg, vec![help_code_window])
+        Diagnostic::help(help_msg, vec![help_code_window])
     }
 
     fn get_item_info(&self, item: Item) -> ItemInfo {

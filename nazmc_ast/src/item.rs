@@ -4,7 +4,7 @@ pub struct Item(u64);
 impl Item {
     pub const KIND_BITS: u64 = 3;
     pub const KIND_SHIFT: u64 = 64 - Self::KIND_BITS;
-    pub const KIND_MASK: u64 = 0b11 << Self::KIND_SHIFT;
+    pub const KIND_MASK: u64 = 0b111 << Self::KIND_SHIFT;
 
     pub const VIS_BITS: u64 = 2;
     pub const VIS_SHIFT: u64 = 64 - Self::KIND_BITS - Self::VIS_BITS;
