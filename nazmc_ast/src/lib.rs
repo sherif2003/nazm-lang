@@ -24,6 +24,8 @@ new_data_pool_key! { FieldsStructKey }
 
 pub type PkgPoolBuilder = DataPoolBuilder<PkgKey, ThinVec<IdKey>>;
 
+pub const TOP_PKG_KEY: PkgKey = PkgKey(0);
+
 #[derive(Default)]
 pub struct Unresolved {
     /// The list of maps of items names and their kind, visibility and index

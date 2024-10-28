@@ -1,8 +1,6 @@
-use std::{collections::HashMap, process::exit};
-
 use nazmc_ast::{
-    ASTId, ASTPaths, FileKey, Item, ItemInfo, ItemPath, PkgKey, PkgPath, UnitStructKey,
-    UnitStructPathKey, Unresolved, AST,
+    ASTId, ASTPaths, FileKey, Item, ItemInfo, ItemPath, PkgKey, PkgPath, TypePathKey,
+    UnitStructKey, UnitStructPathKey, Unresolved, AST,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -11,11 +9,10 @@ use nazmc_data_pool::{
 use nazmc_diagnostics::{
     eprint_diagnostics, file_info::FileInfo, span::Span, CodeWindow, Diagnostic,
 };
+use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
 
-pub fn resolve(ast: nazmc_ast::AST<nazmc_ast::Unresolved>) -> nazmc_ast::AST<nazmc_ast::Resolved> {
-    todo!()
-}
+// TODO: improve err msgs readability
 
 pub struct NameResolver<'a> {
     files_infos: &'a TiSlice<FileKey, FileInfo>,
@@ -121,6 +118,33 @@ impl<'a> NameResolver<'a> {
             })
             .collect::<TiVec<FileKey, ThinVec<_>>>();
 
+        let resolved_types_paths = paths
+            .types_paths
+            .into_iter()
+            .map(|item_path| {
+                let file_key = item_path.pkg_path.file_key;
+
+                if item_path.pkg_path.ids.is_empty() {
+                    // FIXME: The comapring of items kinds err msg is somehow bad
+                    self.resolve_item_path_with_no_pkg_path(
+                        file_key,
+                        item_path,
+                        &resolved_imports,
+                        &resolved_star_imports,
+                        |item_kind| {
+                            item_kind == Item::UNIT_STRUCT
+                                || item_kind == Item::TUPLE_STRUCT
+                                || item_kind == Item::FIELDS_STRUCT
+                        },
+                        "هيكل",
+                    )
+                } else {
+                    self.resolve_non_pkg_item_path(file_key, item_path)
+                }
+                .unwrap_or_default()
+            })
+            .collect::<TiVec<TypePathKey, Item>>();
+
         if !self.diagnostics.is_empty() {
             eprint_diagnostics(self.diagnostics);
             exit(1);
@@ -149,17 +173,150 @@ impl<'a> NameResolver<'a> {
             .unwrap_or(&item_path.item.span)
             .merged_with(&item_path.item.span);
 
-        let resolved_item = self.resolve_item_path(item_path)?;
+        let at_pkg_key = item_path.pkg_path.pkg_key;
 
-        if resolved_item.kind() == Item::PKG {
-            self.add_pkgs_cannot_be_imported_err(at, at_span);
-            None
-        } else if resolved_item.visibility() == Item::DEFAULT {
-            self.add_encapsulation_err(at, at_span, resolved_item, item_id);
-            None
-        } else {
+        let (item_pkg_key, resolved_item) = self.resolve_item_path(item_path)?;
+
+        if self.check_resolved_item(
+            at,
+            at_span,
+            at_pkg_key,
+            item_pkg_key,
+            resolved_item,
+            item_id,
+        ) {
             Some(resolved_item)
+        } else {
+            None
         }
+    }
+
+    fn resolve_item_path_with_no_pkg_path(
+        &mut self,
+        at: FileKey,
+        item_path: ItemPath,
+        imports: &TiSlice<FileKey, HashMap<IdKey, ResolvedImport>>,
+        star_imports: &TiSlice<FileKey, ThinVec<ResolvedStarImport>>,
+        predicate_kind: impl Fn(u64) -> bool,
+        expected_kind: &str,
+    ) -> Option<Item> {
+        let item_ast_id = item_path.item;
+
+        if let Some(item) = imports[at].get(&item_ast_id.id) {
+            return Some(item.resolved_item);
+        }
+
+        if let Some(item) =
+            self.ast.state.pkgs_to_items[nazmc_ast::TOP_PKG_KEY].get(&item_ast_id.id)
+        {
+            return if predicate_kind(item.kind()) {
+                self.add_unexpected_item_kind(
+                    at,
+                    item_ast_id.span,
+                    expected_kind,
+                    explicit_item_kind_to_str(item.kind()),
+                    *item,
+                );
+                None
+            } else {
+                Some(*item)
+            };
+        }
+
+        let resolved_items_with_same_name = star_imports[at]
+            .iter()
+            .filter_map(|star_import| {
+                self.ast.state.pkgs_to_items[star_import.resolved_pkg_key]
+                    .get(&item_ast_id.id)
+                    .filter(|item| predicate_kind(item.kind()))
+                    .map(|item| (star_import, item))
+            })
+            .collect::<Vec<_>>();
+
+        if resolved_items_with_same_name.len() == 1 {
+            let (resolved_star_import, resolved_item) =
+                *resolved_items_with_same_name.first().unwrap();
+
+            let resolved_item = *resolved_item;
+
+            return if predicate_kind(resolved_item.kind()) {
+                self.add_unexpected_item_kind(
+                    at,
+                    item_ast_id.span,
+                    expected_kind,
+                    explicit_item_kind_to_str(resolved_item.kind()),
+                    resolved_item,
+                );
+                None
+            } else if self.check_resolved_item(
+                at,
+                item_ast_id.span,
+                item_path.pkg_path.pkg_key,
+                resolved_star_import.resolved_pkg_key,
+                resolved_item,
+                item_ast_id.id,
+            ) {
+                Some(resolved_item)
+            } else {
+                None
+            };
+        } else if resolved_items_with_same_name.is_empty() {
+            self.add_unresolved_name_err(
+                at,
+                item_ast_id.span,
+                item_ast_id.id,
+                |name| format!("لم يتم العثور على {} بالاسم `{}`", expected_kind, name),
+                |_name| format!(""),
+            );
+            return None;
+        }
+
+        let name = &self.id_pool[item_ast_id.id];
+
+        let mut code_window = CodeWindow::new(&self.files_infos[at], item_ast_id.span.start);
+
+        code_window.mark_error(
+            item_ast_id.span,
+            vec!["يوجد أكثر من عنصر بنفس الاسم تم استيرادهم ضمنياً".to_string()],
+        );
+
+        let mut note = Diagnostic::note(
+            format!(
+                "تم استيراد {} عنصر بنفس الاسم `{}` من المسارات التالية",
+                resolved_items_with_same_name.len(),
+                name
+            ),
+            vec![],
+        );
+
+        let mut help_code_window = CodeWindow::new(
+            &self.files_infos[at],
+            resolved_items_with_same_name
+                .first()
+                .unwrap()
+                .0
+                .pkg_path_span
+                .start,
+        );
+
+        for (resolved_star_import, _resolved_item) in resolved_items_with_same_name {
+            help_code_window.mark_note(resolved_star_import.pkg_path_span, vec!["".to_string()]);
+        }
+
+        note.push_code_window(help_code_window);
+
+        let msg = format!(
+            "الاسم `{}` قد تكرر في الملف ضمنياً، فلا يمكن تحديد أي عنصر يجب استخدامه",
+            name
+        );
+
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+        diagnostic.chain(note);
+
+        self.diagnostics.push(diagnostic);
+
+        None
     }
 
     fn resolve_item_path(
@@ -168,15 +325,35 @@ impl<'a> NameResolver<'a> {
             pkg_path,
             item: item_ast_id,
         }: ItemPath,
-    ) -> Option<Item> {
+    ) -> Option<(PkgKey, Item)> {
+        let empty_path = pkg_path.ids.is_empty();
+
         let file_key = pkg_path.file_key;
 
         let item_pkg_key = self.resolve_pkg_path(pkg_path)?;
 
         if let Some(item) = self.ast.state.pkgs_to_items[item_pkg_key].get(&item_ast_id.id) {
-            Some(*item)
+            Some((item_pkg_key, *item))
         } else {
-            self.add_unresolved_name_err(file_key, item_ast_id.span, item_ast_id.id);
+            self.add_unresolved_name_err(
+                file_key,
+                item_ast_id.span,
+                item_ast_id.id,
+                |name| {
+                    if empty_path {
+                        format!("لم يتم العثور على الاسم `{name}`")
+                    } else {
+                        format!("لم يتم العثور على الاسم `{name}` في المسار")
+                    }
+                },
+                |_name| {
+                    if empty_path {
+                        format!("")
+                    } else {
+                        format!("هذا الاسم غير موجود داخل المسار المحدد")
+                    }
+                },
+            );
             None
         }
     }
@@ -191,26 +368,35 @@ impl<'a> NameResolver<'a> {
         }
     }
 
-    fn check_resolved_item_kind(
+    fn check_resolved_item(
         &mut self,
         at: FileKey,
         at_span: Span,
-        expected_kind: u64,
+        at_pkg_key: PkgKey,
+        item_pkg_key: PkgKey,
+        resolved_item: Item,
+        item_id: IdKey,
+    ) -> bool {
+        if resolved_item.kind() == Item::PKG {
+            self.add_pkgs_cannot_be_imported_err(at, at_span);
+            false
+        } else if resolved_item.visibility() == Item::DEFAULT && item_pkg_key != at_pkg_key {
+            self.add_encapsulation_err(at, at_span, resolved_item, item_id);
+            false
+        } else {
+            true
+        }
+    }
+
+    fn add_unexpected_item_kind(
+        &mut self,
+        at: FileKey,
+        at_span: Span,
+        expected_kind: &str,
+        found_kind: &str,
         item: Item,
     ) {
-        let item_kind = item.kind();
-
-        if item_kind == expected_kind {
-            return;
-        }
-
-        let expected_kind_str = item_kind_to_str(expected_kind);
-        let found_kind_str = item_kind_to_str(item_kind);
-
-        let msg = format!(
-            "يُتوقع {} ولكن تم العثور على {}",
-            expected_kind_str, found_kind_str
-        );
+        let msg = format!("يُتوقع {} ولكن تم العثور على {}", expected_kind, found_kind);
 
         let file_info = &self.files_infos[at];
         let mut code_window = CodeWindow::new(file_info, at_span.start);
@@ -223,17 +409,22 @@ impl<'a> NameResolver<'a> {
         self.diagnostics.push(diagnostic);
     }
 
-    fn add_unresolved_name_err(&mut self, at: FileKey, at_span: Span, id: IdKey) {
+    fn add_unresolved_name_err(
+        &mut self,
+        at: FileKey,
+        at_span: Span,
+        id: IdKey,
+        fmt_msg: impl Fn(&String) -> String,
+        fmt_label: impl Fn(&String) -> String,
+    ) {
         let file_info = &self.files_infos[at];
         let name = &self.id_pool[id];
-        let msg = format!("لم يتم العثور على الاسم `{}` في المسار", name);
 
         let mut code_window = CodeWindow::new(file_info, at_span.start);
 
-        code_window.mark_error(
-            at_span,
-            vec!["هذا الاسم غير موجود داخل المسار المحدد".to_string()],
-        );
+        code_window.mark_error(at_span, vec![fmt_label(name)]);
+
+        let msg = fmt_msg(name);
 
         let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
 
@@ -248,6 +439,7 @@ impl<'a> NameResolver<'a> {
                 let item_file = &self.files_infos[item_info.file_key];
                 let item_span_cursor = item_info.id_span.start;
                 let item_kind_str = item_kind_to_str(found_item.kind());
+
                 let pkg_name = self.fmt_pkg_name(pkg_key);
                 let name = &self.id_pool[id];
                 let item_path = format!(
@@ -298,6 +490,8 @@ impl<'a> NameResolver<'a> {
                     file_key,
                     first_invalid_seg_span,
                     first_invalid_seg_id,
+                    |name| format!("لم يتم العثور على الاسم `{name}` في المسار"),
+                    |_name| format!("هذا الاسم غير موجود داخل المسار المحدد"),
                 );
                 return;
             }
@@ -364,7 +558,6 @@ impl<'a> NameResolver<'a> {
     }
 
     fn get_item_info(&self, item: Item) -> ItemInfo {
-        // FIXME: index is 0 and len is 0
         let idx = item.index();
         match item.kind() {
             Item::UNIT_STRUCT => self.ast.unit_structs[idx].info,
@@ -391,6 +584,19 @@ fn item_kind_to_str(kind: u64) -> &'static str {
     match kind {
         Item::PKG => "حزمة",
         Item::UNIT_STRUCT | Item::TUPLE_STRUCT | Item::FIELDS_STRUCT => "هيكل",
+        Item::FN => "دالة",
+        _ => {
+            unreachable!()
+        }
+    }
+}
+
+fn explicit_item_kind_to_str(kind: u64) -> &'static str {
+    match kind {
+        Item::PKG => "حزمة",
+        Item::UNIT_STRUCT => "هيكل وحدة",
+        Item::TUPLE_STRUCT => "هيكل تراتيب",
+        Item::FIELDS_STRUCT => "هيكل حقول",
         Item::FN => "دالة",
         _ => {
             unreachable!()
