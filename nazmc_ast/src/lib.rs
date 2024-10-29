@@ -141,6 +141,22 @@ pub enum BindingKind {
     Tuple(ThinVec<BindingKind>, Span),
 }
 
+pub fn expand_names_binding<'b>(kind: &'b BindingKind, bound_names: &mut Vec<&'b ASTId>) {
+    match kind {
+        BindingKind::Id(id) => {
+            bound_names.push(id);
+        }
+        BindingKind::MutId { id, .. } => {
+            bound_names.push(id);
+        }
+        BindingKind::Tuple(bindings, ..) => {
+            for binding_kind in bindings {
+                expand_names_binding(binding_kind, bound_names);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Type {
     Path(TypePathKey),

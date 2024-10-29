@@ -1,5 +1,5 @@
 use crate::*;
-use nazmc_ast::FileKey;
+use nazmc_ast::{ASTId, FileKey};
 use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
 use nazmc_diagnostics::eprint_diagnostics;
 use std::{collections::HashMap, process::exit};
@@ -26,6 +26,13 @@ type FnParamsConflictsInFiles = HashMap<(IdKey, FileKey, Span), Vec<Span>>;
 //                                       |      The file key
 //                                       The conflicting param name in a file
 
+type BindingsConflicts = Vec<(IdKey, FileKey, Span)>;
+//                            ^^^^^  ^^^^^^^  ^^^^ The second span found
+//                            |      |
+//                            |      |
+//                            |      The file key
+//                            The conflicting param name in a file
+
 type ItemsAndImportsConflictsInFiles = HashMap<(IdKey, FileKey), Vec<Span>>;
 //                                              ^^^^^  ^^^^^^^       ^^^^ spans found
 //                                              |      |
@@ -41,6 +48,7 @@ pub struct ASTValidator<'a> {
     pub(crate) items_conflicts_in_pkgs: ItemsConflictsInPkgs,
     pub(crate) struct_fields_conflicts_in_files: StructFieldsConflictsInFiles,
     pub(crate) fn_params_conflicts_in_files: FnParamsConflictsInFiles,
+    pub(crate) bindings_conflicts: BindingsConflicts,
     pub(crate) items_and_imports_conflicts_in_files: ItemsAndImportsConflictsInFiles,
 }
 
@@ -55,6 +63,7 @@ impl<'a> ASTValidator<'a> {
             items_conflicts_in_pkgs: Default::default(),
             struct_fields_conflicts_in_files: Default::default(),
             fn_params_conflicts_in_files: Default::default(),
+            bindings_conflicts: Default::default(),
             items_and_imports_conflicts_in_files: Default::default(),
         }
     }
@@ -590,6 +599,21 @@ impl<'a> ASTValidator<'a> {
 
     fn lower_binding(&mut self, binding: Binding) -> nazmc_ast::Binding {
         let kind = self.lower_binding_kind(binding.kind);
+
+        let mut bound_names = vec![];
+
+        nazmc_ast::expand_names_binding(&kind, &mut bound_names);
+
+        bound_names.sort_by_key(|n| n.id);
+
+        bound_names
+            .chunk_by(|a, b| a.id == b.id)
+            .for_each(|chunck| {
+                if chunck.len() != 1 {
+                    self.bindings_conflicts
+                        .push((chunck[0].id, self.file_key, chunck[1].span));
+                }
+            });
 
         let typ = binding.typ.map(|t| self.lower_type(t.typ.unwrap()));
 
@@ -1370,6 +1394,22 @@ impl<'a> ASTValidator<'a> {
             let diagnostic = Diagnostic::error(msg, vec![code_window]);
 
             diagnostics.push(diagnostic);
+        }
+
+        for (id_key, file_key, sec_span) in self.bindings_conflicts {
+            let file_info = &files_infos[file_key];
+
+            let name = &id_pool[id_key];
+
+            let msg = format!("تم حجز الاسم `{}` أكثر من مرة", name);
+
+            let mut code_window = CodeWindow::new(file_info, sec_span.start);
+
+            code_window.mark_error(sec_span, vec!["تم حجزه أكثر من مرة".to_string()]);
+
+            let diangostic = Diagnostic::error(msg, vec![code_window]);
+
+            diagnostics.push(diangostic);
         }
 
         for ((id_key, file_key), spans) in self.items_and_imports_conflicts_in_files {

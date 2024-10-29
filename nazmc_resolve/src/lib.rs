@@ -10,7 +10,7 @@ use nazmc_diagnostics::{
     eprint_diagnostics, file_info::FileInfo, span::Span, CodeWindow, Diagnostic,
 };
 use std::{collections::HashMap, process::exit};
-use thin_vec::ThinVec;
+use thin_vec::{thin_vec, ThinVec};
 
 // TODO: improve err msgs readability
 
@@ -199,6 +199,23 @@ impl<'a> NameResolver<'a> {
                 .unwrap_or_default()
             })
             .collect::<TiVec<FieldsStructPathKey, Item>>();
+
+        // let mut resolved_paths = ti_vec![];
+        let mut names_stacks = vec![];
+
+        self.ast.fns.iter().for_each(|_fn| {
+            _fn.params.iter().for_each(|(param_ast_id, _param_typ)| {
+                names_stacks.push(param_ast_id);
+            });
+
+            _fn.body.stms.iter().for_each(|stm| {
+                if let nazmc_ast::Stm::Let(let_stm) = stm {
+                    nazmc_ast::expand_names_binding(&let_stm.binding.kind, &mut names_stacks);
+                } else {
+                    // TODO
+                }
+            });
+        });
 
         if !self.diagnostics.is_empty() {
             eprint_diagnostics(self.diagnostics);
