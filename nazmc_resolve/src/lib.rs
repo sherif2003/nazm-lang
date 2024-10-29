@@ -1,6 +1,7 @@
 use nazmc_ast::{
-    ASTId, ASTPaths, FieldsStructPathKey, FileKey, Item, ItemInfo, ItemPath, PkgKey, PkgPath,
-    TupleStructPathKey, TypePathKey, UnitStructKey, UnitStructPathKey, Unresolved, AST,
+    ASTId, ASTPaths, FieldsStructPathKey, FileKey, Item, ItemInfo, ItemPath, PathNoPkgKey,
+    PathWithPkgKey, PkgKey, PkgPath, TupleStructPathKey, TypePathKey, UnitStructKey,
+    UnitStructPathKey, Unresolved, AST,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -200,19 +201,40 @@ impl<'a> NameResolver<'a> {
             })
             .collect::<TiVec<FieldsStructPathKey, Item>>();
 
+        let resolved_paths_with_pkgs_exprs = paths
+            .paths_with_pkgs_exprs
+            .into_iter()
+            .map(|item_path| {
+                let file_key = item_path.pkg_path.file_key;
+
+                self.resolve_item_path_from_local_file(
+                    file_key,
+                    item_path,
+                    &resolved_imports,
+                    &resolved_star_imports,
+                    // TODO: Support statics and consts
+                    |item_kind| item_kind == Item::FN,
+                    explicit_item_kind_to_str(Item::FN),
+                )
+                .unwrap_or_default()
+            })
+            .collect::<TiVec<PathWithPkgKey, Item>>();
+
         // let mut resolved_paths = ti_vec![];
         let mut names_stacks = vec![];
 
         self.ast.fns.iter().for_each(|_fn| {
+            names_stacks.clear();
+
             _fn.params.iter().for_each(|(param_ast_id, _param_typ)| {
                 names_stacks.push(param_ast_id);
             });
 
-            _fn.body.stms.iter().for_each(|stm| {
+            self.ast.scopes[_fn.body].stms.iter().for_each(|stm| {
                 if let nazmc_ast::Stm::Let(let_stm) = stm {
                     nazmc_ast::expand_names_binding(&let_stm.binding.kind, &mut names_stacks);
                 } else {
-                    // TODO
+                    
                 }
             });
         });
@@ -234,6 +256,8 @@ impl<'a> NameResolver<'a> {
 
         todo!()
     }
+
+    fn resolve_path_in_scope(&mut self, bound_names: &mut Vec<&ASTId>) {}
 
     fn resolve_non_pkg_item_path(&mut self, at: FileKey, item_path: ItemPath) -> Option<Item> {
         let item_id = item_path.item.id;

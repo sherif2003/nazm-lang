@@ -16,11 +16,13 @@ new_data_pool_key! { TypePathKey }
 new_data_pool_key! { UnitStructPathKey }
 new_data_pool_key! { TupleStructPathKey }
 new_data_pool_key! { FieldsStructPathKey }
-new_data_pool_key! { GeneralPathKey }
+new_data_pool_key! { PathNoPkgKey }
+new_data_pool_key! { PathWithPkgKey }
 
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
 new_data_pool_key! { FieldsStructKey }
+new_data_pool_key! { ScopeKey }
 
 pub type PkgPoolBuilder = DataPoolBuilder<PkgKey, ThinVec<IdKey>>;
 
@@ -45,7 +47,7 @@ pub struct Resolved {
     /// The list of all fields struct expressions paths
     pub field_structs_paths_exprs: TiVec<FieldsStructPathKey, FieldsStructKey>,
     /// The list of all paths expressions
-    pub paths_exprs: TiVec<GeneralPathKey, Item>,
+    pub paths_exprs: TiVec<PathNoPkgKey, Item>,
 }
 
 #[derive(Default)]
@@ -60,6 +62,8 @@ pub struct AST<S> {
     pub fields_structs: ThinVec<FieldsStruct>,
     /// All fns
     pub fns: ThinVec<Fn>,
+    /// All scopes
+    pub scopes: TiVec<ScopeKey, Scope>,
 }
 
 impl AST<Unresolved> {
@@ -95,7 +99,9 @@ pub struct ASTPaths {
     /// The list of all fields struct expressions paths
     pub field_structs_paths_exprs: TiVec<FieldsStructPathKey, ItemPath>,
     /// The list of all paths expressions
-    pub paths_exprs: TiVec<GeneralPathKey, ItemPath>,
+    pub paths_no_pkgs_exprs: TiVec<PathNoPkgKey, ASTId>,
+    /// The
+    pub paths_with_pkgs_exprs: TiVec<PathWithPkgKey, ItemPath>,
 }
 
 #[derive(Clone)]
@@ -214,11 +220,12 @@ pub struct Fn {
     pub info: ItemInfo,
     pub params: ThinVec<(ASTId, Type)>,
     pub return_type: Type,
-    pub body: Scope,
+    pub body: ScopeKey,
 }
 
 #[derive(Clone)]
 pub struct Scope {
+    pub paths_exprs_count: usize,
     pub stms: ThinVec<Stm>,
     pub return_expr: Option<Expr>,
 }
@@ -226,7 +233,7 @@ pub struct Scope {
 #[derive(Clone)]
 pub enum Stm {
     Let(Box<LetStm>),
-    While(Box<(Expr, Scope)>),
+    While(Box<(Expr, ScopeKey)>),
     If(Box<IfExpr>),
     Expr(Box<Expr>),
 }
@@ -247,7 +254,8 @@ pub struct Expr {
 pub enum ExprKind {
     Literal(LiteralExpr),
     Parens(Box<Expr>),
-    Path(GeneralPathKey),
+    PathNoPkg(PathNoPkgKey),
+    PathInPkg(PathWithPkgKey),
     Call(Box<CallExpr>),
     UnitStruct(UnitStructPathKey),
     TupleStruct(Box<TupleStructExpr>),
@@ -341,15 +349,15 @@ pub struct ArrayElementsSizedExpr {
 
 #[derive(Clone)]
 pub struct IfExpr {
-    pub if_: (Expr, Scope),
-    pub else_ifs: ThinVec<(Expr, Scope)>,
-    pub else_: Option<Box<Scope>>,
+    pub if_: (Expr, ScopeKey),
+    pub else_ifs: ThinVec<(Expr, ScopeKey)>,
+    pub else_: Option<ScopeKey>,
 }
 
 #[derive(Clone)]
 pub struct LambdaExpr {
     pub params: ThinVec<Binding>,
-    pub body: Scope,
+    pub body: ScopeKey,
 }
 
 #[derive(Clone)]

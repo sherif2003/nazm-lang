@@ -1,5 +1,5 @@
 use crate::*;
-use nazmc_ast::{ASTId, FileKey};
+use nazmc_ast::FileKey;
 use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
 use nazmc_diagnostics::eprint_diagnostics;
 use std::{collections::HashMap, process::exit};
@@ -553,7 +553,7 @@ impl<'a> ASTValidator<'a> {
     }
 
     #[inline]
-    fn lower_lambda_as_body(&mut self, lambda: LambdaExpr) -> nazmc_ast::Scope {
+    fn lower_lambda_as_body(&mut self, lambda: LambdaExpr) -> nazmc_ast::ScopeKey {
         self.lower_lambda_stms_and_return_expr(lambda.stms, lambda.last_expr)
     }
 
@@ -561,8 +561,10 @@ impl<'a> ASTValidator<'a> {
         &mut self,
         stms: Vec<ParseResult<Stm>>,
         return_expr: Option<Expr>,
-    ) -> nazmc_ast::Scope {
+    ) -> nazmc_ast::ScopeKey {
         let mut ast_stms = ThinVec::new();
+
+        let first_path_expr_idx = self.ast.state.paths.paths_no_pkgs_exprs.len();
 
         for stm in stms {
             let stm = match stm.unwrap() {
@@ -591,10 +593,15 @@ impl<'a> ASTValidator<'a> {
 
         let return_expr = return_expr.map(|expr| self.lower_expr(expr));
 
-        nazmc_ast::Scope {
+        let last_path_expr_idx = self.ast.state.paths.paths_no_pkgs_exprs.len();
+
+        let scope = nazmc_ast::Scope {
             stms: ast_stms,
             return_expr,
-        }
+            paths_exprs_count: last_path_expr_idx - first_path_expr_idx,
+        };
+
+        self.ast.scopes.push_and_get_key(scope)
     }
 
     fn lower_binding(&mut self, binding: Binding) -> nazmc_ast::Binding {
@@ -960,12 +967,27 @@ impl<'a> ASTValidator<'a> {
                         .merged_with(&item_path.item.span)
                 };
 
-                let path_key = self.ast.state.paths.paths_exprs.push_and_get_key(item_path);
+                let kind = if item_path.pkg_path.ids.is_empty() {
+                    let path_key = self
+                        .ast
+                        .state
+                        .paths
+                        .paths_no_pkgs_exprs
+                        .push_and_get_key(item_path.item);
 
-                nazmc_ast::Expr {
-                    span,
-                    kind: nazmc_ast::ExprKind::Path(path_key),
-                }
+                    nazmc_ast::ExprKind::PathNoPkg(path_key)
+                } else {
+                    let path_key = self
+                        .ast
+                        .state
+                        .paths
+                        .paths_with_pkgs_exprs
+                        .push_and_get_key(item_path);
+
+                    nazmc_ast::ExprKind::PathInPkg(path_key)
+                };
+
+                nazmc_ast::Expr { span, kind }
             }
             AtomicExpr::Literal(lit) => {
                 let literal_expr = match lit.data {
@@ -1229,20 +1251,21 @@ impl<'a> ASTValidator<'a> {
         let expr = if let Some(e) = e.expr {
             self.lower_expr(e.expr.unwrap())
         } else {
-            let pkg_path = self.new_pkg_path();
-
             let item = nazmc_ast::ASTId {
                 span: name.span,
                 id: name.id,
             };
 
-            let item_path = nazmc_ast::ItemPath { pkg_path, item };
-
-            let path_key = self.ast.state.paths.paths_exprs.push_and_get_key(item_path);
+            let path_key = self
+                .ast
+                .state
+                .paths
+                .paths_no_pkgs_exprs
+                .push_and_get_key(item);
 
             nazmc_ast::Expr {
                 span: name.span,
-                kind: nazmc_ast::ExprKind::Path(path_key),
+                kind: nazmc_ast::ExprKind::PathNoPkg(path_key),
             }
         };
 
@@ -1310,7 +1333,7 @@ impl<'a> ASTValidator<'a> {
 
         let else_ = if_expr
             .else_cluase
-            .map(|e| Box::new(self.lower_lambda_as_body(e.block.unwrap())));
+            .map(|e| self.lower_lambda_as_body(e.block.unwrap()));
 
         nazmc_ast::IfExpr {
             if_,
