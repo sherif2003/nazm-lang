@@ -226,26 +226,8 @@ fn main() {
 
     ast_validator.validate(&pkgs_names, &files_infos, &id_pool);
 
-    NameResolver::new(&files_infos, &id_pool, &pkgs.map, &pkgs_names, ast).resolve();
+    let ast = NameResolver::new(&files_infos, &id_pool, &pkgs.map, &pkgs_names, ast).resolve();
 
-    // let resolver = nazmc_resolve::NameResolver::new(
-    //     &id_pool,
-    //     &pkgs,
-    //     &pkgs_names,
-    //     &pkgs_to_files_indexes,
-    //     &files_asts,
-    // );
-
-    // let mut nrt = resolver.resolve();
-
-    // let nir_builder = NIRBuilder::new(
-    //     &id_pool,
-    //     pkgs,
-    //     pkgs_names,
-    //     pkgs_to_files_indexes,
-    //     files_asts,
-    //     nrt,
-    // );
     // let (file_path, file_content) = cli::read_file();
 
     // nazmc_parser::parse_file(&file_path, &file_content, &mut id_pool, &mut str_pool);

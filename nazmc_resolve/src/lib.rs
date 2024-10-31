@@ -1,6 +1,7 @@
 use nazmc_ast::{
-    ASTId, FieldsStructPathKey, FileKey, Item, ItemInfo, ItemPath, PathNoPkgKey, PathWithPkgKey,
-    PkgKey, PkgPath, ScopeKey, TupleStructPathKey, TypePathKey, UnitStructPathKey,
+    ASTId, FieldsStructKey, FieldsStructPathKey, FileKey, Item, ItemInfo, ItemPath, PathNoPkgKey,
+    PathWithPkgKey, PkgKey, PkgPath, ScopeKey, TupleStructKey, TupleStructPathKey, TypePathKey,
+    UnitStructKey, UnitStructPathKey,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -12,8 +13,6 @@ use nazmc_diagnostics::{
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
 
-// TODO: improve err msgs readability
-
 pub struct NameResolver<'a> {
     files_infos: &'a TiSlice<FileKey, FileInfo>,
     id_pool: &'a TiSlice<IdKey, String>,
@@ -21,28 +20,9 @@ pub struct NameResolver<'a> {
     pkgs_names: &'a TiSlice<PkgKey, &'a ThinVec<IdKey>>,
     ast: nazmc_ast::AST<nazmc_ast::Unresolved>,
     diagnostics: Vec<Diagnostic<'a>>,
-    // unresolved_pkgs_paths: Vec<(FileKey, ASTId)>,
-    // unresolved_items_paths: Vec<(FileKey, ASTId)>,
-    // wrong_items_found: Vec<WrongItemFoundErr>,
-    // pkgs_cannot_be_imported: Vec<(FileKey, Span)>,
-    // unaccessable_item_errs: Vec<UnaccessableItemErr>,
-}
-
-struct UnaccessableItemErr {
-    imported_at: FileKey,
-    imported_span: Span,
-    found_item_info: ItemInfo,
-}
-
-struct WrongItemFoundErr {
-    file_key: FileKey,
-    span: Span,
-    item_kind: u64,
-    expected_kind: u64,
 }
 
 struct ResolvedImport {
-    alias_span: Span,
     resolved_item: Item,
 }
 
@@ -85,7 +65,7 @@ impl<'a> NameResolver<'a> {
                         (
                             import.alias.id,
                             ResolvedImport {
-                                alias_span: import.alias.span,
+                                // alias_span: import.alias.span,
                                 resolved_item,
                             },
                         )
@@ -124,7 +104,6 @@ impl<'a> NameResolver<'a> {
             .map(|item_path| {
                 let file_key = item_path.pkg_path.file_key;
 
-                // FIXME: The comapring of items kinds err msg is somehow bad
                 self.resolve_item_path_from_local_file(
                     file_key,
                     item_path,
@@ -156,31 +135,30 @@ impl<'a> NameResolver<'a> {
                     explicit_item_kind_to_str(Item::UNIT_STRUCT),
                 )
                 .unwrap_or_default()
+                .index()
+                .into()
             })
-            .collect::<TiVec<UnitStructPathKey, Item>>();
+            .collect::<TiVec<UnitStructPathKey, UnitStructKey>>();
 
         let resolved_tuple_structs_exprs = paths
             .tuple_structs_paths_exprs
             .into_iter()
             .map(|item_path| {
-                println!("ccc");
                 let file_key = item_path.pkg_path.file_key;
 
-                let x = self
-                    .resolve_item_path_from_local_file(
-                        file_key,
-                        item_path,
-                        &resolved_imports,
-                        &resolved_star_imports,
-                        |item_kind| item_kind == Item::TUPLE_STRUCT,
-                        explicit_item_kind_to_str(Item::TUPLE_STRUCT),
-                    )
-                    .unwrap_or_default();
-
-                println!("ccc");
-                x
+                self.resolve_item_path_from_local_file(
+                    file_key,
+                    item_path,
+                    &resolved_imports,
+                    &resolved_star_imports,
+                    |item_kind| item_kind == Item::TUPLE_STRUCT,
+                    explicit_item_kind_to_str(Item::TUPLE_STRUCT),
+                )
+                .unwrap_or_default()
+                .index()
+                .into()
             })
-            .collect::<TiVec<TupleStructPathKey, Item>>();
+            .collect::<TiVec<TupleStructPathKey, TupleStructKey>>();
 
         let resolved_field_structs_exprs = paths
             .field_structs_paths_exprs
@@ -197,8 +175,10 @@ impl<'a> NameResolver<'a> {
                     explicit_item_kind_to_str(Item::FIELDS_STRUCT),
                 )
                 .unwrap_or_default()
+                .index()
+                .into()
             })
-            .collect::<TiVec<FieldsStructPathKey, Item>>();
+            .collect::<TiVec<FieldsStructPathKey, FieldsStructKey>>();
 
         let resolved_paths_with_pkgs_exprs = paths
             .paths_with_pkgs_exprs
@@ -220,7 +200,8 @@ impl<'a> NameResolver<'a> {
             .collect::<TiVec<PathWithPkgKey, Item>>();
 
         // Resolve paths that has no leading pkg path
-        let mut resolved_paths = ti_vec![Default::default(); paths.paths_no_pkgs_exprs.len()];
+        let mut resolved_paths_no_pkgs_exprs =
+            ti_vec![Default::default(); paths.paths_no_pkgs_exprs.len()];
 
         let mut names_stack = vec![];
         let fns_scopes_len = self.ast.fns_scopes.len();
@@ -233,7 +214,7 @@ impl<'a> NameResolver<'a> {
                 &mut names_stack,
                 i.into(),
                 &paths.paths_no_pkgs_exprs,
-                &mut resolved_paths,
+                &mut resolved_paths_no_pkgs_exprs,
                 &resolved_imports,
                 &resolved_star_imports,
             );
@@ -244,17 +225,25 @@ impl<'a> NameResolver<'a> {
             exit(1);
         }
 
-        // let resolved_unit_structs_paths_exprs = paths
-        //     .unit_structs_paths_exprs
-        //     .into_iter()
-        //     .map(|item_path| {
-        //         let item = self.resolve_item_path(item_path);
-        //         self.check_resolved_item_kind(Item::UNIT_STRUCT, item);
-        //         item
-        //     })
-        //     .collect::<TiVec<UnitStructPathKey, Item>>();
+        let state = nazmc_ast::Resolved {
+            types_paths: resolved_types_paths,
+            unit_structs_paths_exprs: resolved_unit_structs_exprs,
+            tuple_structs_paths_exprs: resolved_tuple_structs_exprs,
+            field_structs_paths_exprs: resolved_field_structs_exprs,
+            paths_no_pkgs_exprs: resolved_paths_no_pkgs_exprs,
+            paths_with_pkgs_exprs: resolved_paths_with_pkgs_exprs,
+        };
 
-        todo!()
+        nazmc_ast::AST {
+            state,
+            unit_structs: self.ast.unit_structs,
+            tuple_structs: self.ast.tuple_structs,
+            fields_structs: self.ast.fields_structs,
+            fns: self.ast.fns,
+            fns_scopes: self.ast.fns_scopes,
+            scopes: self.ast.scopes,
+            lets: self.ast.lets,
+        }
     }
 
     fn resolve_paths_in_scope(
@@ -296,7 +285,7 @@ impl<'a> NameResolver<'a> {
                             &resolved_star_imports,
                             // TODO: Support statics and consts
                             |item_kind| item_kind == Item::FN,
-                            explicit_item_kind_to_str(Item::FN),
+                            "عنصر",
                         )
                         .unwrap_or_default();
                 }
@@ -371,6 +360,7 @@ impl<'a> NameResolver<'a> {
         }
     }
 
+    /// BUG
     fn resolve_item_path_with_no_pkg_path(
         &mut self,
         at: FileKey,
@@ -391,7 +381,7 @@ impl<'a> NameResolver<'a> {
             return if predicate_kind(item.kind()) {
                 Some(*item)
             } else {
-                self.add_unexpected_item_kind(
+                self.add_unexpected_item_kind_err(
                     at,
                     item_ast_id.span,
                     expected_kind,
@@ -419,7 +409,7 @@ impl<'a> NameResolver<'a> {
             let resolved_item = *resolved_item;
 
             return if !predicate_kind(resolved_item.kind()) {
-                self.add_unexpected_item_kind(
+                self.add_unexpected_item_kind_err(
                     at,
                     item_ast_id.span,
                     expected_kind,
@@ -440,13 +430,12 @@ impl<'a> NameResolver<'a> {
                 None
             };
         } else if resolved_items_with_same_name.is_empty() {
-            self.add_unresolved_name_err(
-                at,
-                item_ast_id.span,
-                item_ast_id.id,
-                |name| format!("لم يتم العثور على {} بالاسم `{}`", expected_kind, name),
-                |_name| format!(""),
-            );
+            self.add_unresolved_name_err(at, item_ast_id.span, item_ast_id.id, |name| {
+                (
+                    format!("لم يتم العثور على {} بالاسم `{}`", expected_kind, name),
+                    format!(""),
+                )
+            });
             return None;
         }
 
@@ -459,14 +448,28 @@ impl<'a> NameResolver<'a> {
             vec!["يوجد أكثر من عنصر بنفس الاسم تم استيرادهم ضمنياً".to_string()],
         );
 
-        let mut note = Diagnostic::note(
-            format!(
-                "تم استيراد {} عنصر بنفس الاسم `{}` من المسارات التالية",
-                resolved_items_with_same_name.len(),
-                name
-            ),
-            vec![],
-        );
+        let note_msg = match resolved_items_with_same_name.len() {
+            2 => {
+                format!(
+                    "تم استيراد عنصرين بنفس الاسم `{}` من المسارات التالية",
+                    name
+                )
+            }
+            n @ 3..=10 => {
+                format!(
+                    "تم استيراد {} عناصر بنفس الاسم `{}` من المسارات التالية",
+                    n, name
+                )
+            }
+            n => {
+                format!(
+                    "تم استيراد {} عنصر بنفس الاسم `{}` من المسارات التالية",
+                    n, name
+                )
+            }
+        };
+
+        let mut note = Diagnostic::note(note_msg, vec![]);
 
         let mut help_code_window = CodeWindow::new(
             &self.files_infos[at],
@@ -514,25 +517,16 @@ impl<'a> NameResolver<'a> {
         if let Some(item) = self.ast.state.pkgs_to_items[item_pkg_key].get(&item_ast_id.id) {
             Some((item_pkg_key, *item))
         } else {
-            self.add_unresolved_name_err(
-                file_key,
-                item_ast_id.span,
-                item_ast_id.id,
-                |name| {
-                    if empty_path {
-                        format!("لم يتم العثور على الاسم `{name}`")
-                    } else {
-                        format!("لم يتم العثور على الاسم `{name}` في المسار")
-                    }
-                },
-                |_name| {
-                    if empty_path {
-                        format!("")
-                    } else {
-                        format!("هذا الاسم غير موجود داخل المسار المحدد")
-                    }
-                },
-            );
+            self.add_unresolved_name_err(file_key, item_ast_id.span, item_ast_id.id, |name| {
+                if empty_path {
+                    (format!("لم يتم العثور على الاسم `{name}`"), format!(""))
+                } else {
+                    (
+                        format!("لم يتم العثور على الاسم `{name}` في المسار"),
+                        format!("هذا الاسم غير موجود داخل المسار المحدد"),
+                    )
+                }
+            });
             None
         }
     }
@@ -567,8 +561,8 @@ impl<'a> NameResolver<'a> {
         }
     }
 
-    // FIXME: Change mechanism of checking the items' kinds
-    fn add_unexpected_item_kind(
+    // BUG
+    fn add_unexpected_item_kind_err(
         &mut self,
         at: FileKey,
         at_span: Span,
@@ -589,22 +583,21 @@ impl<'a> NameResolver<'a> {
         self.diagnostics.push(diagnostic);
     }
 
+    /// BUG
     fn add_unresolved_name_err(
         &mut self,
         at: FileKey,
         at_span: Span,
         id: IdKey,
-        fmt_msg: impl Fn(&String) -> String,
-        fmt_label: impl Fn(&String) -> String,
+        fmt_msg_and_label: impl Fn(&String) -> (String, String),
     ) {
         let file_info = &self.files_infos[at];
         let name = &self.id_pool[id];
+        let (msg, label) = fmt_msg_and_label(name);
 
         let mut code_window = CodeWindow::new(file_info, at_span.start);
 
-        code_window.mark_error(at_span, vec![fmt_label(name)]);
-
-        let msg = fmt_msg(name);
+        code_window.mark_error(at_span, vec![label]);
 
         let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
 
@@ -670,8 +663,12 @@ impl<'a> NameResolver<'a> {
                     file_key,
                     first_invalid_seg_span,
                     first_invalid_seg_id,
-                    |name| format!("لم يتم العثور على الاسم `{name}` في المسار"),
-                    |_name| format!("هذا الاسم غير موجود داخل المسار المحدد"),
+                    |name| {
+                        (
+                            format!("لم يتم العثور على الاسم `{name}` في المسار"),
+                            format!("هذا الاسم غير موجود داخل المسار المحدد"),
+                        )
+                    },
                 );
                 return;
             }
