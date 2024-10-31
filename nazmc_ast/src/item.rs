@@ -24,6 +24,8 @@ impl Item {
     pub const FN: u64 = 3 << Self::KIND_SHIFT;
     /// 0b_10000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000
     pub const PKG: u64 = 4 << Self::KIND_SHIFT;
+    /// 0b_10100000_00000000_00000000_00000000_00000000_00000000_00000000_00000000
+    pub const LOCAL_VAR: u64 = 5 << Self::KIND_SHIFT;
 
     // Possible visibilties
 

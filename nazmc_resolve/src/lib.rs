@@ -1,7 +1,6 @@
 use nazmc_ast::{
-    ASTId, ASTPaths, FieldsStructPathKey, FileKey, Item, ItemInfo, ItemPath, PathNoPkgKey,
-    PathWithPkgKey, PkgKey, PkgPath, TupleStructPathKey, TypePathKey, UnitStructKey,
-    UnitStructPathKey, Unresolved, AST,
+    ASTId, FieldsStructPathKey, FileKey, Item, ItemInfo, ItemPath, PathNoPkgKey, PathWithPkgKey,
+    PkgKey, PkgPath, ScopeKey, TupleStructPathKey, TypePathKey, UnitStructPathKey,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -11,7 +10,7 @@ use nazmc_diagnostics::{
     eprint_diagnostics, file_info::FileInfo, span::Span, CodeWindow, Diagnostic,
 };
 use std::{collections::HashMap, process::exit};
-use thin_vec::{thin_vec, ThinVec};
+use thin_vec::ThinVec;
 
 // TODO: improve err msgs readability
 
@@ -220,24 +219,25 @@ impl<'a> NameResolver<'a> {
             })
             .collect::<TiVec<PathWithPkgKey, Item>>();
 
-        // let mut resolved_paths = ti_vec![];
-        let mut names_stacks = vec![];
+        // Resolve paths that has no leading pkg path
+        let mut resolved_paths = ti_vec![Default::default(); paths.paths_no_pkgs_exprs.len()];
 
-        self.ast.fns.iter().for_each(|_fn| {
-            names_stacks.clear();
+        let mut names_stack = vec![];
+        let fns_scopes_len = self.ast.fns_scopes.len();
 
-            _fn.params.iter().for_each(|(param_ast_id, _param_typ)| {
-                names_stacks.push(param_ast_id);
-            });
-
-            self.ast.scopes[_fn.body].stms.iter().for_each(|stm| {
-                if let nazmc_ast::Stm::Let(let_stm) = stm {
-                    nazmc_ast::expand_names_binding(&let_stm.binding.kind, &mut names_stacks);
-                } else {
-                    
-                }
-            });
-        });
+        for i in 0..fns_scopes_len {
+            names_stack.clear();
+            let at = self.ast.fns[i].info.file_key;
+            self.resolve_paths_in_scope(
+                at,
+                &mut names_stack,
+                i.into(),
+                &paths.paths_no_pkgs_exprs,
+                &mut resolved_paths,
+                &resolved_imports,
+                &resolved_star_imports,
+            );
+        }
 
         if !self.diagnostics.is_empty() {
             eprint_diagnostics(self.diagnostics);
@@ -257,7 +257,67 @@ impl<'a> NameResolver<'a> {
         todo!()
     }
 
-    fn resolve_path_in_scope(&mut self, bound_names: &mut Vec<&ASTId>) {}
+    fn resolve_paths_in_scope(
+        &mut self,
+        at: FileKey,
+        names_stack: &mut Vec<IdKey>,
+        scope_key: ScopeKey,
+        paths: &TiSlice<PathNoPkgKey, (ASTId, PkgKey)>,
+        resolved_paths: &mut TiSlice<PathNoPkgKey, Item>,
+        resolved_imports: &TiSlice<FileKey, HashMap<IdKey, ResolvedImport>>,
+        resolved_star_imports: &TiSlice<FileKey, ThinVec<ResolvedStarImport>>,
+    ) {
+        let scope = std::mem::take(&mut self.ast.scopes[scope_key]);
+
+        for name in scope.extra_params {
+            names_stack.push(name);
+        }
+
+        'label: for event in scope.events {
+            match event {
+                nazmc_ast::ScopeEvent::Let(let_stm_key) => {
+                    let let_stm = &self.ast.lets[let_stm_key];
+                    nazmc_ast::expand_names_binding_owned(&let_stm.binding.kind, names_stack);
+                }
+                nazmc_ast::ScopeEvent::Path(path_no_pkg_key) => {
+                    let path_expr = &paths[path_no_pkg_key];
+                    for name in names_stack.iter().rev() {
+                        if *name == path_expr.0.id {
+                            resolved_paths[path_no_pkg_key] = Item::new(Item::LOCAL_VAR, 0, 0);
+                            continue 'label;
+                        }
+                    }
+                    resolved_paths[path_no_pkg_key] = self
+                        .resolve_item_path_with_no_pkg_path(
+                            at,
+                            path_expr.0,
+                            path_expr.1,
+                            &resolved_imports,
+                            &resolved_star_imports,
+                            // TODO: Support statics and consts
+                            |item_kind| item_kind == Item::FN,
+                            explicit_item_kind_to_str(Item::FN),
+                        )
+                        .unwrap_or_default();
+                }
+                nazmc_ast::ScopeEvent::Scope(scope_key) => {
+                    let len = names_stack.len();
+
+                    self.resolve_paths_in_scope(
+                        at,
+                        names_stack,
+                        scope_key,
+                        paths,
+                        resolved_paths,
+                        resolved_imports,
+                        resolved_star_imports,
+                    );
+
+                    names_stack.truncate(len);
+                }
+            }
+        }
+    }
 
     fn resolve_non_pkg_item_path(&mut self, at: FileKey, item_path: ItemPath) -> Option<Item> {
         let item_id = item_path.item.id;
@@ -299,7 +359,8 @@ impl<'a> NameResolver<'a> {
         if item_path.pkg_path.ids.is_empty() {
             self.resolve_item_path_with_no_pkg_path(
                 at,
-                item_path,
+                item_path.item,
+                item_path.pkg_path.pkg_key,
                 &resolved_imports,
                 &resolved_star_imports,
                 predicate_kind,
@@ -313,14 +374,13 @@ impl<'a> NameResolver<'a> {
     fn resolve_item_path_with_no_pkg_path(
         &mut self,
         at: FileKey,
-        item_path: ItemPath,
+        item_ast_id: ASTId,
+        item_path_pkg_key: PkgKey,
         resolved_imports: &TiSlice<FileKey, HashMap<IdKey, ResolvedImport>>,
         resolved_star_imports: &TiSlice<FileKey, ThinVec<ResolvedStarImport>>,
         predicate_kind: impl Fn(u64) -> bool,
         expected_kind: &str,
     ) -> Option<Item> {
-        let item_ast_id = item_path.item;
-
         if let Some(item) = resolved_imports[at].get(&item_ast_id.id) {
             return Some(item.resolved_item);
         }
@@ -370,7 +430,7 @@ impl<'a> NameResolver<'a> {
             } else if self.check_resolved_item(
                 at,
                 item_ast_id.span,
-                item_path.pkg_path.pkg_key,
+                item_path_pkg_key,
                 resolved_star_import.resolved_pkg_key,
                 resolved_item,
                 item_ast_id.id,

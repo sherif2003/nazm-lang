@@ -23,6 +23,7 @@ new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
 new_data_pool_key! { FieldsStructKey }
 new_data_pool_key! { ScopeKey }
+new_data_pool_key! { LetStmKey }
 
 pub type PkgPoolBuilder = DataPoolBuilder<PkgKey, ThinVec<IdKey>>;
 
@@ -62,8 +63,12 @@ pub struct AST<S> {
     pub fields_structs: ThinVec<FieldsStruct>,
     /// All fns
     pub fns: ThinVec<Fn>,
+    /// All fns scopse
+    pub fns_scopes: ThinVec<ScopeKey>,
     /// All scopes
     pub scopes: TiVec<ScopeKey, Scope>,
+    /// All let stms
+    pub lets: TiVec<LetStmKey, LetStm>,
 }
 
 impl AST<Unresolved> {
@@ -99,7 +104,7 @@ pub struct ASTPaths {
     /// The list of all fields struct expressions paths
     pub field_structs_paths_exprs: TiVec<FieldsStructPathKey, ItemPath>,
     /// The list of all paths expressions
-    pub paths_no_pkgs_exprs: TiVec<PathNoPkgKey, ASTId>,
+    pub paths_no_pkgs_exprs: TiVec<PathNoPkgKey, (ASTId, PkgKey)>,
     /// The
     pub paths_with_pkgs_exprs: TiVec<PathWithPkgKey, ItemPath>,
 }
@@ -163,6 +168,22 @@ pub fn expand_names_binding<'b>(kind: &'b BindingKind, bound_names: &mut Vec<&'b
     }
 }
 
+pub fn expand_names_binding_owned(kind: &BindingKind, bound_names: &mut Vec<IdKey>) {
+    match kind {
+        BindingKind::Id(ast_id) => {
+            bound_names.push(ast_id.id);
+        }
+        BindingKind::MutId { id, .. } => {
+            bound_names.push(id.id);
+        }
+        BindingKind::Tuple(bindings, ..) => {
+            for binding_kind in bindings {
+                expand_names_binding_owned(binding_kind, bound_names);
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Type {
     Path(TypePathKey),
@@ -220,19 +241,26 @@ pub struct Fn {
     pub info: ItemInfo,
     pub params: ThinVec<(ASTId, Type)>,
     pub return_type: Type,
-    pub body: ScopeKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Scope {
-    pub paths_exprs_count: usize,
+    pub extra_params: Vec<IdKey>,
+    pub events: ThinVec<ScopeEvent>,
     pub stms: ThinVec<Stm>,
     pub return_expr: Option<Expr>,
 }
 
 #[derive(Clone)]
+pub enum ScopeEvent {
+    Let(LetStmKey),
+    Path(PathNoPkgKey),
+    Scope(ScopeKey),
+}
+
+#[derive(Clone)]
 pub enum Stm {
-    Let(Box<LetStm>),
+    Let(LetStmKey),
     While(Box<(Expr, ScopeKey)>),
     If(Box<IfExpr>),
     Expr(Box<Expr>),

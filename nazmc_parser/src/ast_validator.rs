@@ -1,5 +1,5 @@
 use crate::*;
-use nazmc_ast::FileKey;
+use nazmc_ast::{ASTId, FileKey, ScopeKey};
 use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
 use nazmc_diagnostics::eprint_diagnostics;
 use std::{collections::HashMap, process::exit};
@@ -50,6 +50,7 @@ pub struct ASTValidator<'a> {
     pub(crate) fn_params_conflicts_in_files: FnParamsConflictsInFiles,
     pub(crate) bindings_conflicts: BindingsConflicts,
     pub(crate) items_and_imports_conflicts_in_files: ItemsAndImportsConflictsInFiles,
+    pub(crate) current_scope_key: ScopeKey,
 }
 
 impl<'a> ASTValidator<'a> {
@@ -65,6 +66,7 @@ impl<'a> ASTValidator<'a> {
             fn_params_conflicts_in_files: Default::default(),
             bindings_conflicts: Default::default(),
             items_and_imports_conflicts_in_files: Default::default(),
+            current_scope_key: Default::default(),
         }
     }
 
@@ -314,6 +316,9 @@ impl<'a> ASTValidator<'a> {
 
                     let body = self.lower_lambda_as_body(f.body.unwrap());
 
+                    self.ast.scopes[body].extra_params =
+                        params.iter().map(|param| param.0.id).collect();
+
                     let kind = nazmc_ast::Item::FN;
                     let idx = self.ast.fns.len();
                     let item = nazmc_ast::Item::new(kind, vis, idx);
@@ -321,8 +326,8 @@ impl<'a> ASTValidator<'a> {
                         info,
                         params,
                         return_type,
-                        body,
                     });
+                    self.ast.fns_scopes.push(body);
                     self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                 }
             }
@@ -562,9 +567,9 @@ impl<'a> ASTValidator<'a> {
         stms: Vec<ParseResult<Stm>>,
         return_expr: Option<Expr>,
     ) -> nazmc_ast::ScopeKey {
-        let mut ast_stms = ThinVec::new();
-
-        let first_path_expr_idx = self.ast.state.paths.paths_no_pkgs_exprs.len();
+        let scope = nazmc_ast::Scope::default();
+        let last_scope_key = self.current_scope_key;
+        self.current_scope_key = self.ast.scopes.push_and_get_key(scope);
 
         for stm in stms {
             let stm = match stm.unwrap() {
@@ -572,13 +577,25 @@ impl<'a> ASTValidator<'a> {
                 Stm::Let(let_stm) => {
                     let binding = self.lower_binding(let_stm.binding.unwrap());
 
+                    let mut bound_names = vec![];
+
+                    nazmc_ast::expand_names_binding(&binding.kind, &mut bound_names);
+
+                    self.check_bound_names(bound_names);
+
                     let assign = let_stm
                         .let_assign
                         .map(|a| Box::new(self.lower_expr(a.expr.unwrap())));
 
-                    let let_stm = Box::new(nazmc_ast::LetStm { binding, assign });
+                    let let_stm = nazmc_ast::LetStm { binding, assign };
 
-                    nazmc_ast::Stm::Let(let_stm)
+                    let let_stm_key = self.ast.lets.push_and_get_key(let_stm);
+
+                    self.ast.scopes[self.current_scope_key]
+                        .events
+                        .push(nazmc_ast::ScopeEvent::Let(let_stm_key));
+
+                    nazmc_ast::Stm::Let(let_stm_key)
                 }
                 Stm::While(while_stm) => nazmc_ast::Stm::While(Box::new((
                     self.lower_expr(while_stm.conditional_block.condition.unwrap()),
@@ -588,29 +605,19 @@ impl<'a> ASTValidator<'a> {
                 Stm::When(_when_expr) => todo!(),
                 Stm::Expr(stm) => nazmc_ast::Stm::Expr(Box::new(self.lower_expr(stm.expr))),
             };
-            ast_stms.push(stm);
+            self.ast.scopes[self.current_scope_key].stms.push(stm);
         }
 
         let return_expr = return_expr.map(|expr| self.lower_expr(expr));
 
-        let last_path_expr_idx = self.ast.state.paths.paths_no_pkgs_exprs.len();
+        self.ast.scopes[self.current_scope_key].return_expr = return_expr;
 
-        let scope = nazmc_ast::Scope {
-            stms: ast_stms,
-            return_expr,
-            paths_exprs_count: last_path_expr_idx - first_path_expr_idx,
-        };
-
-        self.ast.scopes.push_and_get_key(scope)
+        let scope_key = self.current_scope_key;
+        self.current_scope_key = last_scope_key;
+        scope_key
     }
 
-    fn lower_binding(&mut self, binding: Binding) -> nazmc_ast::Binding {
-        let kind = self.lower_binding_kind(binding.kind);
-
-        let mut bound_names = vec![];
-
-        nazmc_ast::expand_names_binding(&kind, &mut bound_names);
-
+    fn check_bound_names(&mut self, mut bound_names: Vec<&ASTId>) {
         bound_names.sort_by_key(|n| n.id);
 
         bound_names
@@ -621,6 +628,10 @@ impl<'a> ASTValidator<'a> {
                         .push((chunck[0].id, self.file_key, chunck[1].span));
                 }
             });
+    }
+
+    fn lower_binding(&mut self, binding: Binding) -> nazmc_ast::Binding {
+        let kind = self.lower_binding_kind(binding.kind);
 
         let typ = binding.typ.map(|t| self.lower_type(t.typ.unwrap()));
 
@@ -973,7 +984,11 @@ impl<'a> ASTValidator<'a> {
                         .state
                         .paths
                         .paths_no_pkgs_exprs
-                        .push_and_get_key(item_path.item);
+                        .push_and_get_key((item_path.item, item_path.pkg_path.pkg_key));
+
+                    self.ast.scopes[self.current_scope_key]
+                        .events
+                        .push(nazmc_ast::ScopeEvent::Path(path_key));
 
                     nazmc_ast::ExprKind::PathNoPkg(path_key)
                 } else {
@@ -1261,7 +1276,11 @@ impl<'a> ASTValidator<'a> {
                 .state
                 .paths
                 .paths_no_pkgs_exprs
-                .push_and_get_key(item);
+                .push_and_get_key((item, self.pkg_key));
+
+            self.ast.scopes[self.current_scope_key]
+                .events
+                .push(nazmc_ast::ScopeEvent::Path(path_key));
 
             nazmc_ast::Expr {
                 span: name.span,
@@ -1312,6 +1331,17 @@ impl<'a> ASTValidator<'a> {
             nazmc_ast::LambdaExpr { params, body }
         };
 
+        let mut bound_names = vec![];
+
+        for param_binding in &lambda.params {
+            nazmc_ast::expand_names_binding(&param_binding.kind, &mut bound_names);
+        }
+
+        self.ast.scopes[self.current_scope_key].extra_params =
+            bound_names.iter().map(|ast_id| ast_id.id).collect();
+
+        self.check_bound_names(bound_names);
+
         nazmc_ast::Expr {
             span,
             kind: nazmc_ast::ExprKind::Lambda(Box::new(lambda)),
@@ -1321,6 +1351,11 @@ impl<'a> ASTValidator<'a> {
     fn lower_if_expr(&mut self, if_expr: IfExpr) -> nazmc_ast::IfExpr {
         let if_condition = self.lower_expr(if_expr.conditional_block.condition.unwrap());
         let if_body = self.lower_lambda_as_body(if_expr.conditional_block.block.unwrap());
+
+        self.ast.scopes[self.current_scope_key]
+            .events
+            .push(nazmc_ast::ScopeEvent::Scope(if_body));
+
         let if_ = (if_condition, if_body);
 
         let mut else_ifs = ThinVec::new();
@@ -1328,12 +1363,21 @@ impl<'a> ASTValidator<'a> {
         for else_if in if_expr.else_ifs {
             let condition = self.lower_expr(else_if.conditional_block.condition.unwrap());
             let body = self.lower_lambda_as_body(else_if.conditional_block.block.unwrap());
+
+            self.ast.scopes[self.current_scope_key]
+                .events
+                .push(nazmc_ast::ScopeEvent::Scope(body));
+
             else_ifs.push((condition, body));
         }
 
-        let else_ = if_expr
-            .else_cluase
-            .map(|e| self.lower_lambda_as_body(e.block.unwrap()));
+        let else_ = if_expr.else_cluase.map(|e| {
+            let body = self.lower_lambda_as_body(e.block.unwrap());
+            self.ast.scopes[self.current_scope_key]
+                .events
+                .push(nazmc_ast::ScopeEvent::Scope(body));
+            body
+        });
 
         nazmc_ast::IfExpr {
             if_,
