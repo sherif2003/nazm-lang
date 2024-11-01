@@ -133,8 +133,6 @@ dependencies = [
  "nazmc_data_pool",
  "nazmc_diagnostics",
  "nazmc_lexer",
- "nazmc_lower_nir",
- "nazmc_nir",
  "nazmc_parser",
  "nazmc_resolve",
  "owo-colors",
@@ -178,27 +176,6 @@ dependencies = [
  "nazmc_data_pool",
  "nazmc_diagnostics",
  "strum",
-]
-
-[[package]]
-name = "nazmc_lower_nir"
-version = "0.1.0"
-dependencies = [
- "nazmc_ast",
- "nazmc_data_pool",
- "nazmc_diagnostics",
- "nazmc_nir",
- "nazmc_resolve",
- "thin-vec",
-]
-
-[[package]]
-name = "nazmc_nir"
-version = "0.1.0"
-dependencies = [
- "nazmc_data_pool",
- "nazmc_diagnostics",
- "thin-vec",
 ]
 
 [[package]]
