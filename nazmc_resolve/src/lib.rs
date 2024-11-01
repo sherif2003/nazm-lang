@@ -402,9 +402,19 @@ impl<'a> NameResolver<'a> {
             })
             .collect::<Vec<_>>();
 
-        if resolved_items_with_same_name.len() == 1 {
+        let (accessible_items_with_same_name, inaccessible_items_with_same_name): (
+            Vec<(&ResolvedStarImport, &Item)>,
+            Vec<(&ResolvedStarImport, &Item)>,
+        ) = resolved_items_with_same_name.into_iter().partition(
+            |(resolved_star_import, resolved_item)| {
+                resolved_item.visibility() != Item::DEFAULT
+                    || resolved_star_import.resolved_pkg_key == item_path_pkg_key
+            },
+        );
+
+        if accessible_items_with_same_name.len() == 1 {
             let (resolved_star_import, resolved_item) =
-                *resolved_items_with_same_name.first().unwrap();
+                *accessible_items_with_same_name.first().unwrap();
 
             let resolved_item = *resolved_item;
 
@@ -429,13 +439,89 @@ impl<'a> NameResolver<'a> {
             } else {
                 None
             };
-        } else if resolved_items_with_same_name.is_empty() {
-            self.add_unresolved_name_err(at, item_ast_id.span, item_ast_id.id, |name| {
-                (
-                    format!("لم يتم العثور على {} بالاسم `{}`", expected_kind, name),
-                    format!(""),
-                )
-            });
+        } else if accessible_items_with_same_name.is_empty() {
+            if inaccessible_items_with_same_name.is_empty() {
+                self.add_unresolved_name_err_with_possible_paths(
+                    at,
+                    item_ast_id.span,
+                    item_ast_id.id,
+                    |name| {
+                        (
+                            format!("لم يتم العثور على {} بالاسم `{}`", expected_kind, name),
+                            format!(""),
+                        )
+                    },
+                );
+            } else if inaccessible_items_with_same_name.len() == 1 {
+                // TODO; support statics and consts
+
+                let (star_import, item) = inaccessible_items_with_same_name.first().unwrap();
+
+                let mut note_code_window =
+                    CodeWindow::new(&self.files_infos[at], star_import.pkg_path_span.start);
+
+                note_code_window.mark_note(star_import.pkg_path_span, vec![]);
+
+                let item_kind_str = explicit_item_kind_to_str(item.kind());
+
+                let note = Diagnostic::note(
+                    format!(
+                        "تم استيراد {} `{}` هنا ضمنياً",
+                        item_kind_str, self.id_pool[item_ast_id.id]
+                    ),
+                    vec![note_code_window],
+                );
+
+                let reason = if item.kind() == Item::FN {
+                    "لأنها خاصة بالحزمة التابعة لها"
+                } else {
+                    unreachable!()
+                };
+
+                let mut diagnostic =
+                    self.unresolved_name_err(at, item_ast_id.span, item_ast_id.id, |name| {
+                        (
+                            format!("لا يُمكن الوصول إلى {} `{}` {}", item_kind_str, name, reason),
+                            format!(""),
+                        )
+                    });
+
+                diagnostic.chain(note);
+
+                self.diagnostics.push(diagnostic);
+            } else {
+                let mut help_code_window = CodeWindow::new(
+                    &self.files_infos[at],
+                    inaccessible_items_with_same_name
+                        .first()
+                        .unwrap()
+                        .0
+                        .pkg_path_span
+                        .start,
+                );
+
+                for (star_import, _item) in inaccessible_items_with_same_name {
+                    help_code_window.mark_help(star_import.pkg_path_span, vec![]);
+                }
+
+                let help = Diagnostic::help(
+                    format!("تم استيراد ضمنياً عناصر مشابهة من المسارات الآتية ولكنها خاصة بالحزم التابعة لها"),
+                    vec![help_code_window],
+                );
+
+                let mut diagnostic =
+                    self.unresolved_name_err(at, item_ast_id.span, item_ast_id.id, |name| {
+                        (
+                            format!("لم يتم العثور على {} بالاسم `{}`", expected_kind, name),
+                            format!(""),
+                        )
+                    });
+
+                diagnostic.chain(help);
+
+                self.diagnostics.push(diagnostic);
+            }
+
             return None;
         }
 
@@ -448,7 +534,7 @@ impl<'a> NameResolver<'a> {
             vec!["يوجد أكثر من عنصر بنفس الاسم تم استيرادهم ضمنياً".to_string()],
         );
 
-        let note_msg = match resolved_items_with_same_name.len() {
+        let note_msg = match accessible_items_with_same_name.len() {
             2 => {
                 format!(
                     "تم استيراد عنصرين بنفس الاسم `{}` من المسارات التالية",
@@ -473,7 +559,7 @@ impl<'a> NameResolver<'a> {
 
         let mut help_code_window = CodeWindow::new(
             &self.files_infos[at],
-            resolved_items_with_same_name
+            accessible_items_with_same_name
                 .first()
                 .unwrap()
                 .0
@@ -481,7 +567,7 @@ impl<'a> NameResolver<'a> {
                 .start,
         );
 
-        for (resolved_star_import, _resolved_item) in resolved_items_with_same_name {
+        for (resolved_star_import, _resolved_item) in accessible_items_with_same_name {
             help_code_window.mark_note(resolved_star_import.pkg_path_span, vec!["".to_string()]);
         }
 
@@ -517,16 +603,21 @@ impl<'a> NameResolver<'a> {
         if let Some(item) = self.ast.state.pkgs_to_items[item_pkg_key].get(&item_ast_id.id) {
             Some((item_pkg_key, *item))
         } else {
-            self.add_unresolved_name_err(file_key, item_ast_id.span, item_ast_id.id, |name| {
-                if empty_path {
-                    (format!("لم يتم العثور على الاسم `{name}`"), format!(""))
-                } else {
-                    (
-                        format!("لم يتم العثور على الاسم `{name}` في المسار"),
-                        format!("هذا الاسم غير موجود داخل المسار المحدد"),
-                    )
-                }
-            });
+            self.add_unresolved_name_err_with_possible_paths(
+                file_key,
+                item_ast_id.span,
+                item_ast_id.id,
+                |name| {
+                    if empty_path {
+                        (format!("لم يتم العثور على الاسم `{name}`"), format!(""))
+                    } else {
+                        (
+                            format!("لم يتم العثور على الاسم `{name}` في المسار"),
+                            format!("هذا الاسم غير موجود داخل المسار المحدد"),
+                        )
+                    }
+                },
+            );
             None
         }
     }
@@ -561,7 +652,6 @@ impl<'a> NameResolver<'a> {
         }
     }
 
-    // BUG
     fn add_unexpected_item_kind_err(
         &mut self,
         at: FileKey,
@@ -583,14 +673,13 @@ impl<'a> NameResolver<'a> {
         self.diagnostics.push(diagnostic);
     }
 
-    /// BUG
-    fn add_unresolved_name_err(
+    fn unresolved_name_err(
         &mut self,
         at: FileKey,
         at_span: Span,
         id: IdKey,
         fmt_msg_and_label: impl Fn(&String) -> (String, String),
-    ) {
+    ) -> Diagnostic<'a> {
         let file_info = &self.files_infos[at];
         let name = &self.id_pool[id];
         let (msg, label) = fmt_msg_and_label(name);
@@ -599,7 +688,19 @@ impl<'a> NameResolver<'a> {
 
         code_window.mark_error(at_span, vec![label]);
 
-        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+        let diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+        diagnostic
+    }
+
+    fn add_unresolved_name_err_with_possible_paths(
+        &mut self,
+        at: FileKey,
+        at_span: Span,
+        id: IdKey,
+        fmt_msg_and_label: impl Fn(&String) -> (String, String),
+    ) {
+        let mut diagnostic = self.unresolved_name_err(at, at_span, id, fmt_msg_and_label);
 
         let mut possible_paths = vec![];
 
@@ -659,7 +760,7 @@ impl<'a> NameResolver<'a> {
             let first_invalid_seg_span = spans.pop().unwrap();
 
             if self.pkgs.contains_key(&ids) {
-                self.add_unresolved_name_err(
+                self.add_unresolved_name_err_with_possible_paths(
                     file_key,
                     first_invalid_seg_span,
                     first_invalid_seg_id,
