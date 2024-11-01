@@ -56,8 +56,14 @@ pub(crate) enum PostOpExpr {
 #[derive(NazmcParse, Debug)]
 pub(crate) struct InnerAccessExpr {
     pub(crate) dot: DotSymbol,
-    pub(crate) inner: ParseResult<Id>,
+    pub(crate) field: ParseResult<InnerAccessField>,
     pub(crate) post_ops: Vec<PostOpExpr>,
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) enum InnerAccessField {
+    Id(Id),
+    TupleIdx(TupleIdx),
 }
 
 #[derive(NazmcParse, Debug)]

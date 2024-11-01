@@ -1,5 +1,5 @@
 use documented::DocumentedVariants;
-use nazmc_data_pool::PoolIdx;
+use nazmc_data_pool::{IdKey, StrKey};
 use nazmc_diagnostics::span::*;
 use strum::EnumIter;
 
@@ -21,14 +21,14 @@ pub enum TokenKind {
     LineComment,
     DelimitedComment,
     Literal(LiteralKind),
-    Id(PoolIdx),
+    Id(IdKey),
     Symbol(SymbolKind),
     Keyword(KeywordKind),
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum LiteralKind {
-    Str(PoolIdx),
+    Str(StrKey),
     Char(char),
     Bool(bool),
     Num(NumKind),

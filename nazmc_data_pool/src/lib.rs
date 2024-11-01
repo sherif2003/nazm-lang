@@ -1,89 +1,103 @@
-use std::{collections::HashMap, ops::Index};
+use derive_more::{From, Into};
+use std::{collections::HashMap, hash::Hash, marker::PhantomData, usize};
+pub use typed_index_collections;
+use typed_index_collections::TiVec;
 
-use itertools::Itertools;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PoolIdx(usize);
-
-impl PoolIdx {
-    pub const MAIN: Self = Self(0);
-    pub const LAMBDA_IMPLICIT_PARAM: Self = Self(1);
+#[macro_export]
+macro_rules! new_data_pool_key {
+    ($name: ident) => {
+        #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Ord, PartialOrd, From, Into)]
+        pub struct $name(usize);
+    };
 }
 
-mod private {
-    pub trait DisplayTableStateGuard {}
-}
+new_data_pool_key! { IdKey }
 
-pub trait DisplayTableState: private::DisplayTableStateGuard {}
+new_data_pool_key! { StrKey }
 
-#[derive(Clone)]
-pub struct Init(HashMap<String, PoolIdx>);
+pub type IdPoolBuilder = DataPoolBuilder<IdKey, String>;
 
-#[derive(Clone)]
-pub struct Built(Vec<String>);
+pub type StrPoolBuilder = DataPoolBuilder<StrKey, String>;
 
-impl private::DisplayTableStateGuard for Init {}
-impl private::DisplayTableStateGuard for Built {}
-
-impl DisplayTableState for Init {}
-impl DisplayTableState for Built {}
-
-#[derive(Clone)]
-pub struct DataPool<S>
+pub struct DataPoolBuilder<K, V>
 where
-    S: DisplayTableState + Clone,
+    K: From<usize> + Into<usize>,
+    V: Eq + Hash + Clone,
 {
-    state: S,
+    pub map: HashMap<V, usize>,
+    phantom_data: PhantomData<K>,
 }
 
-impl DataPool<Init> {
+impl<K, V> DataPoolBuilder<K, V>
+where
+    K: From<usize> + Into<usize>,
+    V: Eq + Hash + Clone,
+{
     pub fn new() -> Self {
         Self {
-            state: Init(HashMap::new()),
+            map: HashMap::new(),
+            phantom_data: PhantomData,
         }
     }
 
-    pub fn get(&mut self, s: &str) -> PoolIdx {
-        let option = self.state.0.get(s);
-
-        if let Some(display_idx) = option {
-            *display_idx
-        } else {
-            let len = self.state.0.len();
-            self.state.0.insert(s.to_string(), PoolIdx(len));
-            PoolIdx(len)
-        }
-    }
-
-    pub fn build(self) -> DataPool<Built> {
-        let mut table = Vec::with_capacity(self.state.0.len());
-
-        // FIXME: Optimize
-        for (str, idx) in self.state.0 {
-            if idx.0 >= table.len() {
-                for _ in table.len()..=idx.0 {
-                    table.push("".to_string());
-                }
+    pub fn get_key(&mut self, val: &V) -> K {
+        match self.map.get(val) {
+            Some(index) => (*index).into(),
+            None => {
+                let index = self.map.len();
+                self.map.insert(val.clone(), index);
+                index.into()
             }
-            table[idx.0] = str;
+        }
+    }
+
+    pub fn build(self) -> TiVec<K, V> {
+        let len = self.map.len();
+
+        let mut data = TiVec::with_capacity(len);
+
+        let ptr: *mut V = data.as_mut_ptr();
+
+        for (val, index) in self.map {
+            unsafe {
+                ptr.add(index).write(val);
+            }
         }
 
-        // unsafe { table.set_len(self.state.0.len()) };
-
-        // for (str, idx) in self.state.0 {
-        //     table[idx.0] = str;
-        // }
-
-        DataPool {
-            state: Built(table),
+        unsafe {
+            data.set_len(len);
         }
+
+        data
+    }
+
+    pub fn build_ref(&self) -> TiVec<K, &V> {
+        let len = self.map.len();
+
+        let mut data = TiVec::with_capacity(len);
+
+        let ptr: *mut &V = data.as_mut_ptr();
+
+        for (val, index) in &self.map {
+            unsafe {
+                ptr.add(*index).write(val);
+            }
+        }
+
+        unsafe {
+            data.set_len(len);
+        }
+
+        data
     }
 }
 
-impl Index<PoolIdx> for DataPool<Built> {
-    type Output = str;
+pub type IdPool = TiVec<IdKey, String>;
 
-    fn index(&self, index: PoolIdx) -> &Self::Output {
-        &self.state.0[index.0]
-    }
+pub type StrPool = TiVec<StrKey, String>;
+
+impl IdKey {
+    pub const UNIT: Self = Self(0);
+    pub const MAIN: Self = Self(1);
+    pub const IMPLICIT_LAMBDA_PARAM: Self = Self(2);
 }

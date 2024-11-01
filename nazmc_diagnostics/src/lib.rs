@@ -1,6 +1,7 @@
 use owo_colors::OwoColorize;
 use std::fmt::Display;
 mod code_window;
+pub mod file_info;
 pub mod span;
 pub use code_window::CodeWindow;
 

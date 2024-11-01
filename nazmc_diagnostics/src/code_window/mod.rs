@@ -9,7 +9,10 @@ use itertools::Itertools;
 use owo_colors::{OwoColorize, Style};
 use painter::Painter;
 
-use crate::span::{Span, SpanCursor};
+use crate::{
+    file_info::FileInfo,
+    span::{Span, SpanCursor},
+};
 
 mod painter;
 
@@ -22,10 +25,10 @@ pub struct CodeWindow<'a> {
 }
 
 impl<'a> CodeWindow<'a> {
-    pub fn new(file_path: &'a str, file_lines: &'a [String], cursor: SpanCursor) -> Self {
+    pub fn new(file_info: &'a FileInfo, cursor: SpanCursor) -> Self {
         Self {
-            file_path,
-            file_lines,
+            file_path: &file_info.path,
+            file_lines: &file_info.lines,
             cursor,
             code_lines: HashMap::new(),
         }
@@ -690,9 +693,9 @@ mod tests {
     }
 
     fn get_code_reporter() -> CodeWindow {
-        CodeWindow::new(
-            "اختبار.نظم",
-            &[
+        Self {
+            file_path: "اختبار.نظم",
+            file_lines: &[
                 "حجز متغير أ = 555؛".to_string(),
                 "حجز متغير ب = 555؛".to_string(),
                 "حجز متغير ج = 555؛".to_string(),
@@ -707,8 +710,9 @@ mod tests {
                 "حجز متغير ن = 555؛".to_string(),
                 "حجز متغير ز = 555؛".to_string(),
             ],
-            SpanCursor { line: 0, col: 0 },
-        )
+            cursor: SpanCursor { line: 0, col: 0 },
+            code_lines: HashMap::new(),
+        }
     }
 
     #[test]

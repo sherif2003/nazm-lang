@@ -211,9 +211,9 @@ mod tests {
     fn test_enum() {
         let mut id_pool = DataPool::new();
         let mut str_pool = DataPool::new();
-        let (tokens, ..) =
-            LexerIter::new("+-  /** */ - +", &mut id_pool, &mut str_pool).collect_all();
-        let mut tokens_iter = TokensIter::new(&tokens);
+        let content = "+-  /** */ - +";
+        let (tokens, ..) = LexerIter::new(content, &mut id_pool, &mut str_pool).collect_all();
+        let mut tokens_iter = TokensIter::new(&tokens, content);
         tokens_iter.next(); // Init recent
 
         let parse_result = <ParseResult<TermBinOp>>::parse(&mut tokens_iter);
@@ -349,13 +349,9 @@ mod tests {
     fn test_wrong_params() {
         let mut id_pool = DataPool::new();
         let mut str_pool = DataPool::new();
-        let (tokens, ..) = LexerIter::new(
-            "دالة البداية(123 دالة، ت: ح 444، س: ص، ع: ك،) {}",
-            &mut id_pool,
-            &mut str_pool,
-        )
-        .collect_all();
-        let mut tokens_iter = TokensIter::new(&tokens);
+        let content = "دالة البداية(123 دالة، ت: ح 444، س: ص، ع: ك،) {}";
+        let (tokens, ..) = LexerIter::new(content, &mut id_pool, &mut str_pool).collect_all();
+        let mut tokens_iter = TokensIter::new(&tokens, content);
         tokens_iter.next(); // Init recent
 
         let parse_result = <ParseResult<SimpleFn>>::parse(&mut tokens_iter);
@@ -383,9 +379,9 @@ mod tests {
     fn test_zero_params() {
         let mut id_pool = DataPool::new();
         let mut str_pool = DataPool::new();
-        let (tokens, ..) =
-            LexerIter::new("دالة البداية() {}", &mut id_pool, &mut str_pool).collect_all();
-        let mut tokens_iter = TokensIter::new(&tokens);
+        let content = "دالة البداية() {}";
+        let (tokens, ..) = LexerIter::new(content, &mut id_pool, &mut str_pool).collect_all();
+        let mut tokens_iter = TokensIter::new(&tokens, content);
         tokens_iter.next(); // Init recent
 
         let fn_node = <ParseResult<SimpleFn>>::parse(&mut tokens_iter).unwrap();
@@ -403,9 +399,9 @@ mod tests {
     fn test_one_param_no_trailing_comma() {
         let mut id_pool = DataPool::new();
         let mut str_pool = DataPool::new();
-        let (tokens, ..) =
-            LexerIter::new("دالة البداية(س: ص8) {}", &mut id_pool, &mut str_pool).collect_all();
-        let mut tokens_iter = TokensIter::new(&tokens);
+        let content = "دالة البداية(س: ص8) {}";
+        let (tokens, ..) = LexerIter::new(content, &mut id_pool, &mut str_pool).collect_all();
+        let mut tokens_iter = TokensIter::new(&tokens, content);
         tokens_iter.next(); // Init recent
 
         let fn_node = <ParseResult<SimpleFn>>::parse(&mut tokens_iter).unwrap();
@@ -428,9 +424,9 @@ mod tests {
     fn test_one_param_with_trailing_comma() {
         let mut id_pool = DataPool::new();
         let mut str_pool = DataPool::new();
-        let (tokens, ..) =
-            LexerIter::new("دالة البداية(س: ص8،) {}", &mut id_pool, &mut str_pool).collect_all();
-        let mut tokens_iter = TokensIter::new(&tokens);
+        let content = "دالة البداية(س: ص8،) {}";
+        let (tokens, ..) = LexerIter::new(content, &mut id_pool, &mut str_pool).collect_all();
+        let mut tokens_iter = TokensIter::new(&tokens, content);
         tokens_iter.next(); // Init recent
 
         let fn_node = <ParseResult<SimpleFn>>::parse(&mut tokens_iter).unwrap();
@@ -453,10 +449,9 @@ mod tests {
     fn test_two_params_no_trailing_comma() {
         let mut id_pool = DataPool::new();
         let mut str_pool = DataPool::new();
-        let (tokens, ..) =
-            LexerIter::new("دالة البداية(س: ص8، ك: م) {}", &mut id_pool, &mut str_pool)
-                .collect_all();
-        let mut tokens_iter = TokensIter::new(&tokens);
+        let content = "دالة البداية(س: ص8، ك: م) {}";
+        let (tokens, ..) = LexerIter::new(content, &mut id_pool, &mut str_pool).collect_all();
+        let mut tokens_iter = TokensIter::new(&tokens, content);
         tokens_iter.next(); // Init recent
 
         let fn_node = <ParseResult<SimpleFn>>::parse(&mut tokens_iter).unwrap();
@@ -480,10 +475,9 @@ mod tests {
     fn test_two_params_with_trailing_comma() {
         let mut id_pool = DataPool::new();
         let mut str_pool = DataPool::new();
-        let (tokens, ..) =
-            LexerIter::new("دالة البداية(س: ص8، ك: م،) {}", &mut id_pool, &mut str_pool)
-                .collect_all();
-        let mut tokens_iter = TokensIter::new(&tokens);
+        let content = "دالة البداية(س: ص8، ك: م،) {}";
+        let (tokens, ..) = LexerIter::new(content, &mut id_pool, &mut str_pool).collect_all();
+        let mut tokens_iter = TokensIter::new(&tokens, content);
         tokens_iter.next(); // Init recent
 
         let fn_node = <ParseResult<SimpleFn>>::parse(&mut tokens_iter).unwrap();

@@ -1,17 +1,16 @@
-use ast_generator::lower_file;
+pub use ast_validator::ASTValidator;
 use error::*;
+use nazmc_ast::{FileKey, PkgKey};
 use nazmc_diagnostics::{
-    eprint_diagnostics, fmt_diagnostics, span::SpanCursor, CodeWindow, Diagnostic,
+    file_info::FileInfo, fmt_diagnostics, span::SpanCursor, CodeWindow, Diagnostic,
 };
 use nazmc_lexer::*;
-use std::{io::Write, panic};
 use syntax::File;
 
-mod ast_generator;
+mod ast_validator;
 pub(crate) mod parse_methods;
 pub(crate) mod syntax;
 pub(crate) mod tokens_iter;
-
 pub(crate) use nazmc_diagnostics::span::Span;
 pub(crate) use nazmc_parse_derive::*;
 pub(crate) use parse_methods::*;
@@ -20,14 +19,15 @@ pub(crate) use tokens_iter::TokensIter;
 
 pub fn parse(
     tokens: Vec<Token>,
-    file_path: &str,
+    file_info: &FileInfo,
     file_content: &str,
-    file_lines: &[String],
     lexer_errors: Vec<LexerError>,
-) -> Result<nazmc_ast::File, String> {
+    ast_validator: &mut ASTValidator,
+    pkg_key: PkgKey,
+    file_key: FileKey,
+) -> Result<(), String> {
     let mut reporter = ParseErrorsReporter {
-        file_path,
-        file_lines: &file_lines,
+        file_info,
         file_content,
         tokens: &tokens,
         diagnostics: vec![],
@@ -35,7 +35,7 @@ pub fn parse(
 
     reporter.report_lexer_errors(&lexer_errors);
 
-    let mut tokens_iter = TokensIter::new(&tokens);
+    let mut tokens_iter = TokensIter::new(&tokens, &file_content);
 
     tokens_iter.next_non_space_or_comment(); // To init recent()
 
@@ -44,7 +44,11 @@ pub fn parse(
     reporter.check_file(&file);
 
     if reporter.diagnostics.is_empty() {
-        Ok(lower_file(file))
+        ast_validator.pkg_key = pkg_key;
+        ast_validator.file_key = file_key;
+        ast_validator.lower_file(file);
+
+        Ok(())
     } else {
         Err(fmt_diagnostics(reporter.diagnostics))
     }
@@ -52,8 +56,7 @@ pub fn parse(
 
 struct ParseErrorsReporter<'a> {
     tokens: &'a [Token],
-    file_path: &'a str,
-    file_lines: &'a [String],
+    file_info: &'a FileInfo,
     file_content: &'a str,
     diagnostics: Vec<Diagnostic<'a>>,
 }
@@ -66,7 +69,7 @@ impl<'a> ParseErrorsReporter<'a> {
         primary_label: String,
         secondary_labels: Vec<(Span, Vec<String>)>,
     ) {
-        let mut code_window = CodeWindow::new(self.file_path, &self.file_lines, span.start);
+        let mut code_window = CodeWindow::new(self.file_info, span.start);
 
         code_window.mark_error(span, vec![primary_label]);
 
@@ -712,6 +715,7 @@ impl<'a> ParseErrorsReporter<'a> {
                     }) => {
                         let first_span = match &first.kind {
                             BindingKind::Id(terminal) => terminal.span,
+                            BindingKind::MutId(mut_id_binding) => mut_id_binding.mut_keyword.span,
                             BindingKind::Destructed(destructed_tuple) => {
                                 destructed_tuple.open_delim.span
                             }
@@ -726,6 +730,10 @@ impl<'a> ParseErrorsReporter<'a> {
                         } else if !rest.is_empty() {
                             match &rest[rest.len() - 1].item.kind {
                                 BindingKind::Id(terminal) => terminal.span.end,
+                                BindingKind::MutId(mut_id_binding) => match &mut_id_binding.id {
+                                    Ok(id) => id.span.end,
+                                    Err(_) => mut_id_binding.mut_keyword.span.end,
+                                },
                                 BindingKind::Destructed(destructed_tuple) => {
                                     destructed_tuple.open_delim.span.end
                                 }
@@ -825,6 +833,12 @@ impl<'a> ParseErrorsReporter<'a> {
     }
 
     fn check_binding_kind(&mut self, binding_kind: &BindingKind) {
+        if let BindingKind::MutId(MutIdBinding { mut_keyword: _, id }) = binding_kind {
+            if let Err(err) = id {
+                self.report_expected("مُعرِّف", err, vec![]);
+                return;
+            }
+        }
         if let BindingKind::Destructed(destructed_tuple) = binding_kind {
             if let Some(PunctuatedBindingKind {
                 first_item,
@@ -867,7 +881,6 @@ impl<'a> ParseErrorsReporter<'a> {
                     Stm::Semicolon(_) => {}
                     Stm::Let(LetStm {
                         let_keyword: _,
-                        mut_keyword: _,
                         binding,
                         let_assign,
                         semicolon,
@@ -991,11 +1004,11 @@ impl<'a> ParseErrorsReporter<'a> {
 
         for InnerAccessExpr {
             dot: _,
-            inner,
+            field,
             post_ops,
         } in &expr.inner_access
         {
-            if let Err(err) = inner {
+            if let Err(err) = field {
                 self.report_expected("مُعرِّف", err, vec![]);
             }
 

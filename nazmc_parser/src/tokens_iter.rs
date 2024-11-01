@@ -2,14 +2,16 @@ use nazmc_lexer::{Token, TokenKind};
 
 pub(crate) struct TokensIter<'a> {
     pub(crate) peek_idx: usize,
-    tokens: &'a [Token],
+    pub(crate) tokens: &'a [Token],
+    pub(crate) content: &'a str,
 }
 
 impl<'a> TokensIter<'a> {
-    pub(crate) fn new(tokens: &'a [Token]) -> Self {
+    pub(crate) fn new(tokens: &'a [Token], content: &'a str) -> Self {
         Self {
             peek_idx: 0,
             tokens,
+            content,
         }
     }
 

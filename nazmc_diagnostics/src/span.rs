@@ -1,12 +1,12 @@
 use std::{fmt::Debug, usize};
 
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Default, Eq, PartialOrd, Ord, Hash)]
 pub struct Span {
     pub start: SpanCursor,
     pub end: SpanCursor,
 }
 
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Default, Eq, PartialOrd, Ord, Hash)]
 pub struct SpanCursor {
     /// The line index
     pub line: usize,

@@ -13,7 +13,6 @@ pub(crate) enum Stm {
 #[derive(NazmcParse, Debug)]
 pub(crate) struct LetStm {
     pub(crate) let_keyword: LetKeyword,
-    pub(crate) mut_keyword: Option<MutKeyword>,
     pub(crate) binding: ParseResult<Binding>,
     pub(crate) let_assign: Option<LetAssign>,
     pub(crate) semicolon: ParseResult<SemicolonSymbol>,
@@ -28,7 +27,14 @@ pub(crate) struct Binding {
 #[derive(NazmcParse, Debug)]
 pub(crate) enum BindingKind {
     Id(Id),
+    MutId(MutIdBinding),
     Destructed(Box<DestructedTuple>), // Box for the large size
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) struct MutIdBinding {
+    pub(crate) mut_keyword: MutKeyword,
+    pub(crate) id: ParseResult<Id>,
 }
 
 generatePunctuatedItem!(Binding);
