@@ -452,6 +452,22 @@ impl<'a> ParseErrorsReporter<'a> {
             }
         }
 
+        if let Some(alias) = &import_stm.alias {
+            if last_star_symbol_span.is_some() {
+                self.report(
+                    "يُتوقع فاصلة منقوطة `؛`، ولكن تم العثور على `على`".to_string(),
+                    alias.on.span,
+                    "رمز غير متوقع".to_string(),
+                    vec![],
+                );
+                return;
+            }
+
+            if let Err(err) = &alias.id {
+                self.report_expected("مُعرِّف", err, vec![]);
+            }
+        }
+
         self.check_semicolon_result(&import_stm.semicolon);
     }
 

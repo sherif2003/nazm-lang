@@ -130,9 +130,17 @@ impl<'a> ASTValidator<'a> {
                 id: item_id,
             };
 
-            let alias = nazmc_ast::ASTId {
-                span: item_span,
-                id: item_id,
+            let alias = if let Some(alias) = import_stm.alias {
+                let id = alias.id.unwrap();
+                nazmc_ast::ASTId {
+                    span: id.span,
+                    id: id.data.val,
+                }
+            } else {
+                nazmc_ast::ASTId {
+                    span: item_span,
+                    id: item_id,
+                }
             };
 
             if let Some(span_of_item_with_same_name) =

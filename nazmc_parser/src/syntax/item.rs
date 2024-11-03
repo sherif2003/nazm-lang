@@ -13,6 +13,7 @@ pub(crate) struct ImportStm {
     pub(crate) top: ParseResult<Id>,
     pub(crate) sec: ParseResult<DoubleColonsWithPathSegInImportStm>,
     pub(crate) segs: Vec<DoubleColonsWithPathSegInImportStm>,
+    pub(crate) alias: Option<ImportAlias>,
     pub(crate) semicolon: ParseResult<SemicolonSymbol>,
 }
 
@@ -26,6 +27,13 @@ pub(crate) struct DoubleColonsWithPathSegInImportStm {
 pub(crate) enum PathSegInImportStm {
     Id(Id),
     Star(StarSymbol),
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) struct ImportAlias {
+    /// TODO: Change the keyword
+    pub(crate) on: OnKeyword,
+    pub(crate) id: ParseResult<Id>
 }
 
 #[derive(NazmcParse, Debug)]
