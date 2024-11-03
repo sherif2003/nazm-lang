@@ -256,13 +256,13 @@ impl<'a> NameResolver<'a> {
         resolved_imports: &TiSlice<FileKey, HashMap<IdKey, ResolvedImport>>,
         resolved_star_imports: &TiSlice<FileKey, ThinVec<ResolvedStarImport>>,
     ) {
-        let scope = std::mem::take(&mut self.ast.scopes[scope_key]);
+        let scope = &self.ast.scopes[scope_key];
 
-        for name in scope.extra_params {
-            names_stack.push(name);
+        for name in &scope.extra_params {
+            names_stack.push(*name);
         }
 
-        'label: for event in scope.events {
+        'label: for event in std::mem::take(&mut self.ast.scopes[scope_key].events) {
             match event {
                 nazmc_ast::ScopeEvent::Let(let_stm_key) => {
                     let let_stm = &self.ast.lets[let_stm_key];
@@ -360,7 +360,6 @@ impl<'a> NameResolver<'a> {
         }
     }
 
-    /// BUG
     fn resolve_item_path_with_no_pkg_path(
         &mut self,
         at: FileKey,

@@ -41,7 +41,7 @@ pub fn parse(
 
     let file = ParseResult::<File>::parse(&mut tokens_iter).unwrap();
 
-    reporter.check_file(&file);
+    reporter.check_file_items(&file.content.items);
 
     if reporter.diagnostics.is_empty() {
         ast_validator.pkg_key = pkg_key;
@@ -389,28 +389,58 @@ impl<'a> ParseErrorsReporter<'a> {
         );
     }
 
-    fn check_file(&mut self, file: &File) {
-        for import in &file.imports {
-            if let Err(err) = &import.top {
-                self.report_expected("اسم حزمة", err, vec![]);
+    fn check_import_stm(&mut self, import_stm: &ImportStm) {
+        if let Err(err) = &import_stm.top {
+            self.report_expected("اسم حزمة", err, vec![]);
+            return;
+        }
+
+        let mut last_star_symbol_span = None;
+
+        match &import_stm.sec {
+            Ok(a) => match &a.seg {
+                Ok(b) => {
+                    if let PathSegInImportStm::Star(s) = b {
+                        last_star_symbol_span = Some(s.span)
+                    }
+                }
+                Err(err) => self.report_expected("اسم أو *", err, vec![]),
+            },
+            Err(_) => {
+                self.report(
+                    "يُتوقع `::` ثم اسم عنصر أو `*` بعد الحزمة".to_string(),
+                    if let Ok(t) = &import_stm.top {
+                        t.span
+                    } else {
+                        unreachable!()
+                    },
+                    "قُم بعدها بإضافة `::` ثم اسم عنصر أو `*`".to_string(),
+                    vec![],
+                );
                 return;
             }
+        }
 
-            let mut last_star_symbol_span = None;
-
-            match &import.sec {
-                Ok(a) => match &a.seg {
-                    Ok(b) => {
-                        if let PathSegInImportStm::Star(s) = b {
-                            last_star_symbol_span = Some(s.span)
+        for seg in &import_stm.segs {
+            match &seg.seg {
+                Ok(a) => {
+                    if let PathSegInImportStm::Star(s) = a {
+                        if let Some(span) = last_star_symbol_span {
+                            self.report(
+                                "الرمز `*` يجب أن يكون في آخر المسار".to_string(),
+                                span,
+                                "".to_string(),
+                                vec![],
+                            );
+                            return;
                         }
+                        last_star_symbol_span = Some(s.span)
                     }
-                    Err(err) => self.report_expected("اسم أو *", err, vec![]),
-                },
+                }
                 Err(_) => {
                     self.report(
                         "يُتوقع `::` ثم اسم عنصر أو `*` بعد الحزمة".to_string(),
-                        if let Ok(t) = &import.top {
+                        if let Ok(t) = &import_stm.top {
                             t.span
                         } else {
                             unreachable!()
@@ -418,44 +448,11 @@ impl<'a> ParseErrorsReporter<'a> {
                         "قُم بعدها بإضافة `::` ثم اسم عنصر أو `*`".to_string(),
                         vec![],
                     );
-                    return;
                 }
             }
-
-            for seg in &import.segs {
-                match &seg.seg {
-                    Ok(a) => {
-                        if let PathSegInImportStm::Star(s) = a {
-                            if let Some(span) = last_star_symbol_span {
-                                self.report(
-                                    "الرمز `*` يجب أن يكون في آخر المسار".to_string(),
-                                    span,
-                                    "".to_string(),
-                                    vec![],
-                                );
-                                return;
-                            }
-                            last_star_symbol_span = Some(s.span)
-                        }
-                    }
-                    Err(_) => {
-                        self.report(
-                            "يُتوقع `::` ثم اسم عنصر أو `*` بعد الحزمة".to_string(),
-                            if let Ok(t) = &import.top {
-                                t.span
-                            } else {
-                                unreachable!()
-                            },
-                            "قُم بعدها بإضافة `::` ثم اسم عنصر أو `*`".to_string(),
-                            vec![],
-                        );
-                    }
-                }
-            }
-
-            self.check_semicolon_result(&import.semicolon);
         }
-        self.check_file_items(&file.content.items);
+
+        self.check_semicolon_result(&import_stm.semicolon);
     }
 
     fn check_file_items(&mut self, items: &[ParseResult<FileItem>]) {
@@ -470,6 +467,10 @@ impl<'a> ParseErrorsReporter<'a> {
             };
 
             let item = match node {
+                FileItem::ImportStm(import_stm) => {
+                    self.check_import_stm(import_stm);
+                    continue;
+                }
                 FileItem::WithVisModifier(ItemWithVisibility { visibility, item }) => match item {
                     Ok(item) => item,
                     Err(_) => {

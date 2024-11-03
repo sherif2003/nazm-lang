@@ -2,8 +2,30 @@ use super::*;
 
 #[derive(NazmcParse, Debug)]
 pub(crate) enum FileItem {
+    ImportStm(ImportStm),
     WithVisModifier(ItemWithVisibility),
     WithoutModifier(Item),
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) struct ImportStm {
+    pub(crate) import_keyword: ImportKeyword,
+    pub(crate) top: ParseResult<Id>,
+    pub(crate) sec: ParseResult<DoubleColonsWithPathSegInImportStm>,
+    pub(crate) segs: Vec<DoubleColonsWithPathSegInImportStm>,
+    pub(crate) semicolon: ParseResult<SemicolonSymbol>,
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) struct DoubleColonsWithPathSegInImportStm {
+    pub(crate) double_colons: DoubleColonsSymbol,
+    pub(crate) seg: ParseResult<PathSegInImportStm>,
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) enum PathSegInImportStm {
+    Id(Id),
+    Star(StarSymbol),
 }
 
 #[derive(NazmcParse, Debug)]

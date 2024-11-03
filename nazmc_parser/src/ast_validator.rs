@@ -73,7 +73,6 @@ impl<'a> ASTValidator<'a> {
     pub(crate) fn lower_file(&mut self, file: File) {
         self.items_names_in_current_file.clear();
         self.lower_file_items(file.content.items);
-        self.lower_imports(file.imports);
     }
 
     #[inline]
@@ -87,70 +86,68 @@ impl<'a> ASTValidator<'a> {
     }
 
     #[inline]
-    fn lower_imports(&mut self, imports_stms: Vec<ImportStm>) {
-        for import_stm in imports_stms {
-            let mut pkg_path = self.new_pkg_path();
+    fn lower_import_stm(&mut self, import_stm: ImportStm) {
+        let mut pkg_path = self.new_pkg_path();
 
-            let mut import_all = false;
+        let mut import_all = false;
 
-            if let Ok(id) = import_stm.top {
-                pkg_path.ids.push(id.data.val);
-                pkg_path.spans.push(id.span);
-            } else {
-                unreachable!()
+        if let Ok(id) = import_stm.top {
+            pkg_path.ids.push(id.data.val);
+            pkg_path.spans.push(id.span);
+        } else {
+            unreachable!()
+        };
+
+        if let Ok(s) = import_stm.sec {
+            match s.seg.unwrap() {
+                syntax::PathSegInImportStm::Id(id) => {
+                    pkg_path.ids.push(id.data.val);
+                    pkg_path.spans.push(id.span);
+                }
+                syntax::PathSegInImportStm::Star(_) => import_all = true,
+            }
+        } else {
+            unreachable!()
+        };
+
+        for s in import_stm.segs {
+            match s.seg.unwrap() {
+                syntax::PathSegInImportStm::Id(id) => {
+                    pkg_path.ids.push(id.data.val);
+                    pkg_path.spans.push(id.span);
+                }
+                syntax::PathSegInImportStm::Star(_) => import_all = true,
+            }
+        }
+
+        if import_all {
+            self.ast.state.paths.star_imports[self.file_key].push(pkg_path);
+        } else {
+            let item_id = pkg_path.ids.pop().unwrap();
+            let item_span = pkg_path.spans.pop().unwrap();
+            let item = nazmc_ast::ASTId {
+                span: item_span,
+                id: item_id,
             };
 
-            if let Ok(s) = import_stm.sec {
-                match s.seg.unwrap() {
-                    syntax::PathSegInImportStm::Id(id) => {
-                        pkg_path.ids.push(id.data.val);
-                        pkg_path.spans.push(id.span);
-                    }
-                    syntax::PathSegInImportStm::Star(_) => import_all = true,
-                }
-            } else {
-                unreachable!()
+            let alias = nazmc_ast::ASTId {
+                span: item_span,
+                id: item_id,
             };
 
-            for s in import_stm.segs {
-                match s.seg.unwrap() {
-                    syntax::PathSegInImportStm::Id(id) => {
-                        pkg_path.ids.push(id.data.val);
-                        pkg_path.spans.push(id.span);
-                    }
-                    syntax::PathSegInImportStm::Star(_) => import_all = true,
-                }
+            if let Some(span_of_item_with_same_name) =
+                self.items_names_in_current_file.get(&alias.id)
+            {
+                self.items_and_imports_conflicts_in_files
+                    .entry((alias.id, self.file_key))
+                    .or_insert_with(|| vec![*span_of_item_with_same_name])
+                    .push(alias.span);
             }
 
-            if import_all {
-                self.ast.state.paths.star_imports[self.file_key].push(pkg_path);
-            } else {
-                let item_id = pkg_path.ids.pop().unwrap();
-                let item_span = pkg_path.spans.pop().unwrap();
-                let item = nazmc_ast::ASTId {
-                    span: item_span,
-                    id: item_id,
-                };
-
-                let alias = nazmc_ast::ASTId {
-                    span: item_span,
-                    id: item_id,
-                };
-
-                if let Some(span_of_item_with_same_name) =
-                    self.items_names_in_current_file.get(&alias.id)
-                {
-                    self.items_and_imports_conflicts_in_files
-                        .entry((alias.id, self.file_key))
-                        .or_insert_with(|| vec![*span_of_item_with_same_name])
-                        .push(alias.span);
-                }
-
-                self.ast.state.paths.imports[self.file_key].push(nazmc_ast::ImportStm {
-                    item_path: nazmc_ast::ItemPath { pkg_path, item },
-                    alias,
-                });
-            }
+            self.ast.state.paths.imports[self.file_key].push(nazmc_ast::ImportStm {
+                item_path: nazmc_ast::ItemPath { pkg_path, item },
+                alias,
+            });
         }
     }
 
@@ -158,6 +155,10 @@ impl<'a> ASTValidator<'a> {
     fn lower_file_items(&mut self, file_items: Vec<ParseResult<FileItem>>) {
         for file_item in file_items {
             let (item, vis) = match file_item.unwrap() {
+                syntax::FileItem::ImportStm(import_stm) => {
+                    self.lower_import_stm(import_stm);
+                    continue;
+                }
                 syntax::FileItem::WithVisModifier(item_with_vis) => {
                     let Ok(item) = item_with_vis.item else {
                         unreachable!()
