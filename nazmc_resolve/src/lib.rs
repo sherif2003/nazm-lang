@@ -191,9 +191,12 @@ impl<'a> NameResolver<'a> {
                     item_path,
                     &resolved_imports,
                     &resolved_star_imports,
-                    // TODO: Support statics and consts
-                    |item_kind| item_kind == Item::FN,
-                    explicit_item_kind_to_str(Item::FN),
+                    |item_kind| {
+                        item_kind == Item::FN
+                            || item_kind == Item::STATIC
+                            || item_kind == Item::CONST
+                    },
+                    "عنصر",
                 )
                 .unwrap_or_default()
             })
@@ -236,6 +239,8 @@ impl<'a> NameResolver<'a> {
 
         nazmc_ast::AST {
             state,
+            consts: self.ast.consts,
+            statics: self.ast.statics,
             unit_structs: self.ast.unit_structs,
             tuple_structs: self.ast.tuple_structs,
             fields_structs: self.ast.fields_structs,
@@ -283,8 +288,11 @@ impl<'a> NameResolver<'a> {
                             path_expr.1,
                             &resolved_imports,
                             &resolved_star_imports,
-                            // TODO: Support statics and consts
-                            |item_kind| item_kind == Item::FN,
+                            |item_kind| {
+                                item_kind == Item::FN
+                                    || item_kind == Item::STATIC
+                                    || item_kind == Item::CONST
+                            },
                             "عنصر",
                         )
                         .unwrap_or_default();
@@ -473,6 +481,8 @@ impl<'a> NameResolver<'a> {
 
                 let reason = if item.kind() == Item::FN {
                     "لأنها خاصة بالحزمة التابعة لها"
+                } else if item.kind() == Item::CONST || item.kind() == Item::STATIC {
+                    "لأنه خاص بالحزمة التابع لها"
                 } else {
                     unreachable!()
                 };
@@ -786,14 +796,26 @@ impl<'a> NameResolver<'a> {
         let name = &self.id_pool[name];
         let item_kind = resolved_item.kind();
         let msg = match item_kind {
+            Item::CONST => {
+                format!(
+                    "لا يمكن الوصول إلى الثابت `{}` لأنه خاص بالحزمة التابع لها",
+                    name
+                )
+            }
+            Item::STATIC => {
+                format!(
+                    "لا يمكن الوصول إلى المشترك `{}` لأنه خاص بالحزمة التابع لها",
+                    name
+                )
+            }
             Item::UNIT_STRUCT | Item::TUPLE_STRUCT | Item::FIELDS_STRUCT => {
                 format!(
-                    "لا يمكن الوصول إلى هيكل `{}` لأنه خاص بالحزمة التابع لها",
+                    "لا يمكن الوصول إلى الهيكل `{}` لأنه خاص بالحزمة التابع لها",
                     name
                 )
             }
             Item::FN => format!(
-                "لا يمكن الوصول إلى دالة `{}` لأنها خاصة بالحزمة التابعة لها",
+                "لا يمكن الوصول إلى الدالة `{}` لأنها خاصة بالحزمة التابعة لها",
                 name
             ),
             _ => {
@@ -841,6 +863,8 @@ impl<'a> NameResolver<'a> {
             Item::TUPLE_STRUCT => self.ast.tuple_structs[idx].info,
             Item::FIELDS_STRUCT => self.ast.fields_structs[idx].info,
             Item::FN => self.ast.fns[idx].info,
+            Item::CONST => self.ast.consts[idx].info,
+            Item::STATIC => self.ast.statics[idx].info,
             _ => {
                 unreachable!()
             }
@@ -861,6 +885,8 @@ fn item_kind_to_str(kind: u64) -> &'static str {
     match kind {
         Item::PKG => "حزمة",
         Item::UNIT_STRUCT | Item::TUPLE_STRUCT | Item::FIELDS_STRUCT => "هيكل",
+        Item::CONST => "ثابت",
+        Item::STATIC => "مشترك",
         Item::FN => "دالة",
         _ => {
             unreachable!()
@@ -874,6 +900,8 @@ fn explicit_item_kind_to_str(kind: u64) -> &'static str {
         Item::UNIT_STRUCT => "هيكل وحدة",
         Item::TUPLE_STRUCT => "هيكل تراتيب",
         Item::FIELDS_STRUCT => "هيكل حقول",
+        Item::CONST => "ثابت",
+        Item::STATIC => "مشترك",
         Item::FN => "دالة",
         _ => {
             unreachable!()

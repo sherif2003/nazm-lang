@@ -57,6 +57,10 @@ pub struct Resolved {
 pub struct AST<S> {
     /// The state of AST: may be `Unresolved` or `Resolved`
     pub state: S,
+    /// All consts
+    pub consts: ThinVec<Const>,
+    /// All statics
+    pub statics: ThinVec<Static>,
     /// All unit structs
     pub unit_structs: ThinVec<UnitStruct>,
     /// All tuple structs
@@ -212,6 +216,20 @@ pub enum VisModifier {
 pub struct ItemInfo {
     pub file_key: FileKey,
     pub id_span: Span,
+}
+
+#[derive(Clone)]
+pub struct Const {
+    pub info: ItemInfo,
+    pub typ: Type,
+    pub expr: Expr,
+}
+
+#[derive(Clone)]
+pub struct Static {
+    pub info: ItemInfo,
+    pub typ: Type,
+    pub expr: Expr,
 }
 
 #[derive(Clone)]

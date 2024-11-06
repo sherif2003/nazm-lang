@@ -381,8 +381,8 @@ impl<'a> LexerIter<'a> {
     }
 
     fn next_id_or_keyword(&mut self) -> TokenKind {
-        if !self.cursor.stopped_at.1.is_alphabetic() {
-            let c = self.cursor.stopped_at.1;
+        let c = self.cursor.stopped_at.1;
+        if !c.is_alphabetic() && c != '_' {
             let id_key = self.id_pool.get_key(&c.to_string());
             self.next_cursor();
             self.errs.push(LexerError {

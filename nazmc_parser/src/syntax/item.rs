@@ -33,7 +33,7 @@ pub(crate) enum PathSegInImportStm {
 pub(crate) struct ImportAlias {
     /// TODO: Change the keyword
     pub(crate) on: OnKeyword,
-    pub(crate) id: ParseResult<Id>
+    pub(crate) id: ParseResult<Id>,
 }
 
 #[derive(NazmcParse, Debug)]
@@ -44,8 +44,32 @@ pub(crate) struct ItemWithVisibility {
 
 #[derive(NazmcParse, Debug)]
 pub(crate) enum Item {
+    Const(ConstStm),
+    Static(StaticStm),
     Struct(Struct),
     Fn(Fn),
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) struct ConstStm {
+    pub(crate) const_keyword: ConstKeyword,
+    pub(crate) body: ParseResult<ConstStaticStmBody>,
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) struct StaticStm {
+    pub(crate) static_keyword: StaticKeyword,
+    pub(crate) body: ParseResult<ConstStaticStmBody>,
+}
+
+#[derive(NazmcParse, Debug)]
+pub(crate) struct ConstStaticStmBody {
+    pub(crate) id: Id,
+    pub(crate) colon: ParseResult<ColonSymbol>,
+    pub(crate) typ: ParseResult<Type>,
+    pub(crate) equal: ParseResult<EqualSymbol>,
+    pub(crate) expr: ParseResult<Expr>,
+    pub(crate) semicolon: ParseResult<SemicolonSymbol>,
 }
 
 #[derive(NazmcParse, Debug)]

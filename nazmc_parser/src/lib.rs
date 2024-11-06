@@ -503,10 +503,38 @@ impl<'a> ParseErrorsReporter<'a> {
             };
 
             match item {
+                Item::Const(_const) => self.check_const_static_stm_body(&_const.body),
+                Item::Static(_static) => self.check_const_static_stm_body(&_static.body),
                 Item::Struct(s) => self.check_struct(s),
                 Item::Fn(f) => self.check_fn(f),
             }
         }
+    }
+
+    fn check_const_static_stm_body(&mut self, body: &ParseResult<ConstStaticStmBody>) {
+        let body = match body {
+            Ok(body) => body,
+            Err(err) => {
+                self.report_expected("مُعرِّف", err, vec![]);
+                return;
+            }
+        };
+
+        if let Err(err) = &body.colon {
+            self.report_expected("`:`", err, vec![]);
+            return;
+        }
+
+        self.check_type_result(&body.typ);
+
+        if let Err(err) = &body.equal {
+            self.report_expected("`=`", err, vec![]);
+            return;
+        }
+
+        self.check_expr_result(&body.expr);
+
+        self.check_semicolon_result(&body.semicolon);
     }
 
     fn check_struct(&mut self, s: &Struct) {

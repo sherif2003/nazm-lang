@@ -184,6 +184,60 @@ impl<'a> ASTValidator<'a> {
             };
 
             match item {
+                Item::Const(c) => {
+                    let body = c.body.unwrap();
+                    let name = body.id;
+                    let id = name.data.val;
+                    let id_span = name.span;
+
+                    if self.check_if_name_conflicts(id, id_span) {
+                        continue;
+                    }
+
+                    self.items_names_in_current_file.insert(id, id_span);
+
+                    let info = nazmc_ast::ItemInfo {
+                        file_key: self.file_key,
+                        id_span,
+                    };
+
+                    let typ = self.lower_type(body.typ.unwrap());
+
+                    let expr = self.lower_expr(body.expr.unwrap());
+
+                    let kind = nazmc_ast::Item::CONST;
+                    let idx = self.ast.consts.len();
+                    let item = nazmc_ast::Item::new(kind, vis, idx);
+                    self.ast.consts.push(nazmc_ast::Const { info, typ, expr });
+                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
+                }
+                Item::Static(s) => {
+                    let body = s.body.unwrap();
+                    let name = body.id;
+                    let id = name.data.val;
+                    let id_span = name.span;
+
+                    if self.check_if_name_conflicts(id, id_span) {
+                        continue;
+                    }
+
+                    self.items_names_in_current_file.insert(id, id_span);
+
+                    let info = nazmc_ast::ItemInfo {
+                        file_key: self.file_key,
+                        id_span,
+                    };
+
+                    let typ = self.lower_type(body.typ.unwrap());
+
+                    let expr = self.lower_expr(body.expr.unwrap());
+
+                    let kind = nazmc_ast::Item::STATIC;
+                    let idx = self.ast.statics.len();
+                    let item = nazmc_ast::Item::new(kind, vis, idx);
+                    self.ast.statics.push(nazmc_ast::Static { info, typ, expr });
+                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
+                }
                 Item::Struct(s) => {
                     let name = s.name.unwrap();
                     let id = name.data.val;
@@ -364,6 +418,8 @@ impl<'a> ASTValidator<'a> {
                         self.ast.fields_structs[item_with_same_id.index()].info
                     }
                     nazmc_ast::Item::FN => self.ast.fns[item_with_same_id.index()].info,
+                    nazmc_ast::Item::CONST => self.ast.consts[item_with_same_id.index()].info,
+                    nazmc_ast::Item::STATIC => self.ast.statics[item_with_same_id.index()].info,
                     _ => {
                         unreachable!()
                     }
