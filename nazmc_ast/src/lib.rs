@@ -1,5 +1,5 @@
 use derive_more::{From, Into};
-pub use item::Item;
+pub use item::*;
 use nazmc_data_pool::{
     new_data_pool_key,
     typed_index_collections::{ti_vec, TiVec},
@@ -22,6 +22,9 @@ new_data_pool_key! { PathWithPkgKey }
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
 new_data_pool_key! { FieldsStructKey }
+new_data_pool_key! { ConstKey }
+new_data_pool_key! { StaticKey }
+new_data_pool_key! { FnKey }
 new_data_pool_key! { ScopeKey }
 new_data_pool_key! { LetStmKey }
 
@@ -58,19 +61,19 @@ pub struct AST<S> {
     /// The state of AST: may be `Unresolved` or `Resolved`
     pub state: S,
     /// All consts
-    pub consts: ThinVec<Const>,
+    pub consts: TiVec<ConstKey, Const>,
     /// All statics
-    pub statics: ThinVec<Static>,
+    pub statics: TiVec<StaticKey, Static>,
     /// All unit structs
-    pub unit_structs: ThinVec<UnitStruct>,
+    pub unit_structs: TiVec<UnitStructKey, UnitStruct>,
     /// All tuple structs
-    pub tuple_structs: ThinVec<TupleStruct>,
+    pub tuple_structs: TiVec<TupleStructKey, TupleStruct>,
     /// All fields structs
-    pub fields_structs: ThinVec<FieldsStruct>,
+    pub fields_structs: TiVec<FieldsStructKey, FieldsStruct>,
     /// All fns
-    pub fns: ThinVec<Fn>,
+    pub fns: TiVec<FnKey, Fn>,
     /// All fns scopse
-    pub fns_scopes: ThinVec<ScopeKey>,
+    pub fns_scopes: TiVec<FnKey, ScopeKey>,
     /// All scopes
     pub scopes: TiVec<ScopeKey, Scope>,
     /// All let stms
@@ -193,7 +196,6 @@ pub fn expand_names_binding_owned(kind: &BindingKind, bound_names: &mut Vec<IdKe
 #[derive(Clone)]
 pub enum Type {
     Path(TypePathKey),
-    Unit(Span),
     Tuple(ThinVec<Type>, Span),
     Paren(Box<Type>, Span),
     Slice(Box<Type>, Span),
@@ -205,8 +207,9 @@ pub enum Type {
     Lambda(ThinVec<Type>, Box<Type>, Span),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub enum VisModifier {
+    #[default]
     Default,
     Public,
     Private,

@@ -161,10 +161,11 @@ impl<'a> ASTValidator<'a> {
 
     #[inline]
     fn lower_file_items(&mut self, file_items: Vec<ParseResult<FileItem>>) {
+        let mut imports_stms = vec![];
         for file_item in file_items {
             let (item, vis) = match file_item.unwrap() {
                 syntax::FileItem::ImportStm(import_stm) => {
-                    self.lower_import_stm(import_stm);
+                    imports_stms.push(import_stm);
                     continue;
                 }
                 syntax::FileItem::WithVisModifier(item_with_vis) => {
@@ -175,12 +176,12 @@ impl<'a> ASTValidator<'a> {
                     (
                         item,
                         match item_with_vis.visibility.data {
-                            syntax::VisModifierToken::Public => nazmc_ast::Item::PUBLIC,
-                            syntax::VisModifierToken::Private => nazmc_ast::Item::PRIVATE,
+                            syntax::VisModifierToken::Public => nazmc_ast::VisModifier::Public,
+                            syntax::VisModifierToken::Private => nazmc_ast::VisModifier::Private,
                         },
                     )
                 }
-                syntax::FileItem::WithoutModifier(item) => (item, nazmc_ast::Item::DEFAULT),
+                syntax::FileItem::WithoutModifier(item) => (item, nazmc_ast::VisModifier::Default),
             };
 
             match item {
@@ -205,10 +206,13 @@ impl<'a> ASTValidator<'a> {
 
                     let expr = self.lower_expr(body.expr.unwrap());
 
-                    let kind = nazmc_ast::Item::CONST;
-                    let idx = self.ast.consts.len();
-                    let item = nazmc_ast::Item::new(kind, vis, idx);
-                    self.ast.consts.push(nazmc_ast::Const { info, typ, expr });
+                    let key =
+                        self.ast
+                            .consts
+                            .push_and_get_key(nazmc_ast::Const { info, typ, expr });
+
+                    let item = nazmc_ast::Item::Const { vis, key };
+
                     self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                 }
                 Item::Static(s) => {
@@ -232,10 +236,13 @@ impl<'a> ASTValidator<'a> {
 
                     let expr = self.lower_expr(body.expr.unwrap());
 
-                    let kind = nazmc_ast::Item::STATIC;
-                    let idx = self.ast.statics.len();
-                    let item = nazmc_ast::Item::new(kind, vis, idx);
-                    self.ast.statics.push(nazmc_ast::Static { info, typ, expr });
+                    let key =
+                        self.ast
+                            .statics
+                            .push_and_get_key(nazmc_ast::Static { info, typ, expr });
+
+                    let item = nazmc_ast::Item::Static { vis, key };
+
                     self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                 }
                 Item::Struct(s) => {
@@ -256,10 +263,13 @@ impl<'a> ASTValidator<'a> {
 
                     match s.kind.unwrap() {
                         StructKind::Unit(_) => {
-                            let kind = nazmc_ast::Item::UNIT_STRUCT;
-                            let idx = self.ast.unit_structs.len();
-                            let item = nazmc_ast::Item::new(kind, vis, idx);
-                            self.ast.unit_structs.push(nazmc_ast::UnitStruct { info });
+                            let key = self
+                                .ast
+                                .unit_structs
+                                .push_and_get_key(nazmc_ast::UnitStruct { info });
+
+                            let item = nazmc_ast::Item::UnitStruct { vis, key };
+
                             self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                         StructKind::Tuple(tuple_struct_fields) => {
@@ -280,12 +290,13 @@ impl<'a> ASTValidator<'a> {
                                 }
                             }
 
-                            let kind = nazmc_ast::Item::TUPLE_STRUCT;
-                            let idx = self.ast.tuple_structs.len();
-                            let item = nazmc_ast::Item::new(kind, vis, idx);
-                            self.ast
+                            let key = self
+                                .ast
                                 .tuple_structs
-                                .push(nazmc_ast::TupleStruct { info, types });
+                                .push_and_get_key(nazmc_ast::TupleStruct { info, types });
+
+                            let item = nazmc_ast::Item::TupleStruct { vis, key };
+
                             self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                         StructKind::Fields(struct_fields) => {
@@ -314,12 +325,13 @@ impl<'a> ASTValidator<'a> {
                                 }
                             }
 
-                            let kind = nazmc_ast::Item::FIELDS_STRUCT;
-                            let idx = self.ast.fields_structs.len();
-                            let item = nazmc_ast::Item::new(kind, vis, idx);
-                            self.ast
+                            let key = self
+                                .ast
                                 .fields_structs
-                                .push(nazmc_ast::FieldsStruct { info, fields });
+                                .push_and_get_key(nazmc_ast::FieldsStruct { info, fields });
+
+                            let item = nazmc_ast::Item::FieldsStruct { vis, key };
+
                             self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                         }
                     }
@@ -374,26 +386,34 @@ impl<'a> ASTValidator<'a> {
                     let return_type = if let Some(ColonWithType { colon: _, typ }) = f.return_type {
                         self.lower_type(typ.unwrap())
                     } else {
-                        nazmc_ast::Type::Unit(f.body.as_ref().unwrap().open_curly.span)
+                        nazmc_ast::Type::Tuple(
+                            ThinVec::new(),
+                            f.body.as_ref().unwrap().open_curly.span,
+                        )
                     };
 
-                    let body = self.lower_lambda_as_body(f.body.unwrap());
+                    let scope_key = self.lower_lambda_as_body(f.body.unwrap());
 
-                    self.ast.scopes[body].extra_params =
+                    self.ast.scopes[scope_key].extra_params =
                         params.iter().map(|param| param.0.id).collect();
 
-                    let kind = nazmc_ast::Item::FN;
-                    let idx = self.ast.fns.len();
-                    let item = nazmc_ast::Item::new(kind, vis, idx);
-                    self.ast.fns.push(nazmc_ast::Fn {
+                    self.ast.fns_scopes.push(scope_key);
+
+                    let key = self.ast.fns.push_and_get_key(nazmc_ast::Fn {
                         info,
                         params,
                         return_type,
                     });
-                    self.ast.fns_scopes.push(body);
+
+                    let item = nazmc_ast::Item::Fn { vis, key };
+
                     self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
                 }
             }
+        }
+
+        for import_stm in imports_stms {
+            self.lower_import_stm(import_stm);
         }
     }
 
@@ -407,20 +427,14 @@ impl<'a> ASTValidator<'a> {
             .or_default()
             .entry(id)
             .or_insert_with(|| {
-                let first_occurrence_info = match item_with_same_id.kind() {
-                    nazmc_ast::Item::UNIT_STRUCT => {
-                        self.ast.unit_structs[item_with_same_id.index()].info
-                    }
-                    nazmc_ast::Item::TUPLE_STRUCT => {
-                        self.ast.tuple_structs[item_with_same_id.index()].info
-                    }
-                    nazmc_ast::Item::FIELDS_STRUCT => {
-                        self.ast.fields_structs[item_with_same_id.index()].info
-                    }
-                    nazmc_ast::Item::FN => self.ast.fns[item_with_same_id.index()].info,
-                    nazmc_ast::Item::CONST => self.ast.consts[item_with_same_id.index()].info,
-                    nazmc_ast::Item::STATIC => self.ast.statics[item_with_same_id.index()].info,
-                    _ => {
+                let first_occurrence_info = match *item_with_same_id {
+                    nazmc_ast::Item::UnitStruct { key, .. } => self.ast.unit_structs[key].info,
+                    nazmc_ast::Item::TupleStruct { key, .. } => self.ast.tuple_structs[key].info,
+                    nazmc_ast::Item::FieldsStruct { key, .. } => self.ast.fields_structs[key].info,
+                    nazmc_ast::Item::Const { key, .. } => self.ast.consts[key].info,
+                    nazmc_ast::Item::Static { key, .. } => self.ast.statics[key].info,
+                    nazmc_ast::Item::Fn { key, .. } => self.ast.fns[key].info,
+                    nazmc_ast::Item::Pkg | nazmc_ast::Item::LocalVar => {
                         unreachable!()
                     }
                 };
@@ -559,7 +573,6 @@ impl<'a> ASTValidator<'a> {
                         nazmc_ast::Type::Path(type_path_key) => {
                             self.ast.state.paths.types_paths[*type_path_key].item.span
                         }
-                        nazmc_ast::Type::Unit(span) => *span,
                         nazmc_ast::Type::Tuple(_, span) => *span,
                         nazmc_ast::Type::Paren(_, span) => *span,
                         nazmc_ast::Type::Slice(_, span) => *span,
@@ -579,9 +592,7 @@ impl<'a> ASTValidator<'a> {
                         .span
                         .merged_with(&paren_type.tuple.close_delim.unwrap().span);
 
-                    if types.is_empty() {
-                        nazmc_ast::Type::Unit(parens_span)
-                    } else if !trailing_comma_in_types && types.len() == 1 {
+                    if !trailing_comma_in_types && types.len() == 1 {
                         nazmc_ast::Type::Paren(Box::new(types.pop().unwrap()), parens_span)
                     } else {
                         nazmc_ast::Type::Tuple(types, parens_span)
@@ -1472,10 +1483,11 @@ impl<'a> ASTValidator<'a> {
 
             for (conflicting_name, files_conflicts) in conflicts {
                 let name = &id_pool[conflicting_name];
-                let msg = format!(
-                    "يوجد أكثر من عنصر لهم نفس الاسم `{}` في نفس الحزمة `{}`",
-                    name, pkg_display_name
-                );
+                let mut msg = format!("يوجد أكثر من عنصر لهم نفس الاسم `{}` في نفس الحزمة", name,);
+                if !pkg_display_name.is_empty() {
+                    msg.push_str(&format!(" `{}`", pkg_display_name));
+                }
+
                 let mut diagnostic = Diagnostic::error(msg, vec![]);
                 let mut occurrences = 1;
                 for (file_key, spans) in files_conflicts {

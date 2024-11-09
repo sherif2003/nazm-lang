@@ -171,7 +171,7 @@ fn main() {
 
         let pkg_key: PkgKey = (*pkg_key_usize).into();
 
-        ast.state.pkgs_to_items[pkg_key].insert(*ids.last().unwrap(), Item::new(Item::PKG, 0, 0));
+        ast.state.pkgs_to_items[pkg_key].insert(*ids.last().unwrap(), Item::Pkg);
     });
 
     let pkgs_names = pkgs.build_ref();

@@ -1,7 +1,7 @@
 use nazmc_ast::{
-    ASTId, FieldsStructKey, FieldsStructPathKey, FileKey, Item, ItemInfo, ItemPath, PathNoPkgKey,
-    PathWithPkgKey, PkgKey, PkgPath, ScopeKey, TupleStructKey, TupleStructPathKey, TypePathKey,
-    UnitStructKey, UnitStructPathKey,
+    ASTId, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey, Item, ItemInfo, ItemPath,
+    PathNoPkgKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey, TupleStructKey, TupleStructPathKey,
+    TypePathKey, UnitStructKey, UnitStructPathKey, VisModifier,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -109,10 +109,13 @@ impl<'a> NameResolver<'a> {
                     item_path,
                     &resolved_imports,
                     &resolved_star_imports,
-                    |item_kind| {
-                        item_kind == Item::UNIT_STRUCT
-                            || item_kind == Item::TUPLE_STRUCT
-                            || item_kind == Item::FIELDS_STRUCT
+                    |item| {
+                        matches!(
+                            item,
+                            Item::UnitStruct { .. }
+                                | Item::TupleStruct { .. }
+                                | Item::FieldsStruct { .. }
+                        )
                     },
                     "هيكل",
                 )
@@ -131,12 +134,20 @@ impl<'a> NameResolver<'a> {
                     item_path,
                     &resolved_imports,
                     &resolved_star_imports,
-                    |item_kind| item_kind == Item::UNIT_STRUCT,
-                    explicit_item_kind_to_str(Item::UNIT_STRUCT),
+                    |item| matches!(item, Item::UnitStruct { .. }),
+                    explicit_item_kind_to_str(Item::UnitStruct {
+                        vis: VisModifier::Default,
+                        key: UnitStructKey::default(),
+                    }),
                 )
+                .map(|item| {
+                    if let Item::UnitStruct { key, .. } = item {
+                        key
+                    } else {
+                        Default::default()
+                    }
+                })
                 .unwrap_or_default()
-                .index()
-                .into()
             })
             .collect::<TiVec<UnitStructPathKey, UnitStructKey>>();
 
@@ -151,12 +162,20 @@ impl<'a> NameResolver<'a> {
                     item_path,
                     &resolved_imports,
                     &resolved_star_imports,
-                    |item_kind| item_kind == Item::TUPLE_STRUCT,
-                    explicit_item_kind_to_str(Item::TUPLE_STRUCT),
+                    |item| matches!(item, Item::TupleStruct { .. }),
+                    explicit_item_kind_to_str(Item::TupleStruct {
+                        vis: VisModifier::Default,
+                        key: TupleStructKey::default(),
+                    }),
                 )
+                .map(|item| {
+                    if let Item::TupleStruct { key, .. } = item {
+                        key
+                    } else {
+                        Default::default()
+                    }
+                })
                 .unwrap_or_default()
-                .index()
-                .into()
             })
             .collect::<TiVec<TupleStructPathKey, TupleStructKey>>();
 
@@ -171,12 +190,20 @@ impl<'a> NameResolver<'a> {
                     item_path,
                     &resolved_imports,
                     &resolved_star_imports,
-                    |item_kind| item_kind == Item::FIELDS_STRUCT,
-                    explicit_item_kind_to_str(Item::FIELDS_STRUCT),
+                    |item| matches!(item, Item::FieldsStruct { .. }),
+                    explicit_item_kind_to_str(Item::FieldsStruct {
+                        vis: VisModifier::Default,
+                        key: FieldsStructKey::default(),
+                    }),
                 )
+                .map(|item| {
+                    if let Item::FieldsStruct { key, .. } = item {
+                        key
+                    } else {
+                        Default::default()
+                    }
+                })
                 .unwrap_or_default()
-                .index()
-                .into()
             })
             .collect::<TiVec<FieldsStructPathKey, FieldsStructKey>>();
 
@@ -191,10 +218,11 @@ impl<'a> NameResolver<'a> {
                     item_path,
                     &resolved_imports,
                     &resolved_star_imports,
-                    |item_kind| {
-                        item_kind == Item::FN
-                            || item_kind == Item::STATIC
-                            || item_kind == Item::CONST
+                    |item| {
+                        matches!(
+                            item,
+                            Item::Const { .. } | Item::Static { .. } | Item::Fn { .. }
+                        )
                     },
                     "عنصر",
                 )
@@ -207,15 +235,18 @@ impl<'a> NameResolver<'a> {
             ti_vec![Default::default(); paths.paths_no_pkgs_exprs.len()];
 
         let mut names_stack = vec![];
+
         let fns_scopes_len = self.ast.fns_scopes.len();
 
         for i in 0..fns_scopes_len {
             names_stack.clear();
-            let at = self.ast.fns[i].info.file_key;
+            let fn_key = FnKey::from(i);
+            let scope_key = self.ast.fns_scopes[fn_key];
+            let at = self.ast.fns[fn_key].info.file_key;
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
-                i.into(),
+                scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
                 &resolved_imports,
@@ -277,7 +308,7 @@ impl<'a> NameResolver<'a> {
                     let path_expr = &paths[path_no_pkg_key];
                     for name in names_stack.iter().rev() {
                         if *name == path_expr.0.id {
-                            resolved_paths[path_no_pkg_key] = Item::new(Item::LOCAL_VAR, 0, 0);
+                            resolved_paths[path_no_pkg_key] = Item::LocalVar;
                             continue 'label;
                         }
                     }
@@ -288,10 +319,11 @@ impl<'a> NameResolver<'a> {
                             path_expr.1,
                             &resolved_imports,
                             &resolved_star_imports,
-                            |item_kind| {
-                                item_kind == Item::FN
-                                    || item_kind == Item::STATIC
-                                    || item_kind == Item::CONST
+                            |item| {
+                                matches!(
+                                    item,
+                                    Item::Const { .. } | Item::Static { .. } | Item::Fn { .. }
+                                )
                             },
                             "عنصر",
                         )
@@ -350,7 +382,7 @@ impl<'a> NameResolver<'a> {
         item_path: ItemPath,
         resolved_imports: &TiSlice<FileKey, HashMap<IdKey, ResolvedImport>>,
         resolved_star_imports: &TiSlice<FileKey, ThinVec<ResolvedStarImport>>,
-        predicate_kind: impl Fn(u64) -> bool,
+        predicate_kind: impl Fn(Item) -> bool,
         expected_kind: &str,
     ) -> Option<Item> {
         if item_path.pkg_path.ids.is_empty() {
@@ -375,7 +407,7 @@ impl<'a> NameResolver<'a> {
         item_path_pkg_key: PkgKey,
         resolved_imports: &TiSlice<FileKey, HashMap<IdKey, ResolvedImport>>,
         resolved_star_imports: &TiSlice<FileKey, ThinVec<ResolvedStarImport>>,
-        predicate_kind: impl Fn(u64) -> bool,
+        predicate_kind: impl Fn(Item) -> bool,
         expected_kind: &str,
     ) -> Option<Item> {
         if let Some(item) = resolved_imports[at].get(&item_ast_id.id) {
@@ -385,14 +417,14 @@ impl<'a> NameResolver<'a> {
         if let Some(item) =
             self.ast.state.pkgs_to_items[nazmc_ast::TOP_PKG_KEY].get(&item_ast_id.id)
         {
-            return if predicate_kind(item.kind()) {
+            return if predicate_kind(*item) {
                 Some(*item)
             } else {
                 self.add_unexpected_item_kind_err(
                     at,
                     item_ast_id.span,
                     expected_kind,
-                    explicit_item_kind_to_str(item.kind()),
+                    explicit_item_kind_to_str(*item),
                     *item,
                 );
                 None
@@ -404,7 +436,7 @@ impl<'a> NameResolver<'a> {
             .filter_map(|star_import| {
                 self.ast.state.pkgs_to_items[star_import.resolved_pkg_key]
                     .get(&item_ast_id.id)
-                    .filter(|item| predicate_kind(item.kind()))
+                    .filter(|item| predicate_kind(**item))
                     .map(|item| (star_import, item))
             })
             .collect::<Vec<_>>();
@@ -413,9 +445,19 @@ impl<'a> NameResolver<'a> {
             Vec<(&ResolvedStarImport, &Item)>,
             Vec<(&ResolvedStarImport, &Item)>,
         ) = resolved_items_with_same_name.into_iter().partition(
-            |(resolved_star_import, resolved_item)| {
-                resolved_item.visibility() != Item::DEFAULT
-                    || resolved_star_import.resolved_pkg_key == item_path_pkg_key
+            |(resolved_star_import, resolved_item)| match resolved_item {
+                Item::UnitStruct { vis, .. }
+                | Item::TupleStruct { vis, .. }
+                | Item::FieldsStruct { vis, .. }
+                | Item::Const { vis, .. }
+                | Item::Static { vis, .. }
+                | Item::Fn { vis, .. }
+                    if !matches!(vis, nazmc_ast::VisModifier::Default)
+                        || resolved_star_import.resolved_pkg_key == item_path_pkg_key =>
+                {
+                    true
+                }
+                _ => false,
             },
         );
 
@@ -425,12 +467,12 @@ impl<'a> NameResolver<'a> {
 
             let resolved_item = *resolved_item;
 
-            return if !predicate_kind(resolved_item.kind()) {
+            return if !predicate_kind(resolved_item) {
                 self.add_unexpected_item_kind_err(
                     at,
                     item_ast_id.span,
                     expected_kind,
-                    explicit_item_kind_to_str(resolved_item.kind()),
+                    explicit_item_kind_to_str(resolved_item),
                     resolved_item,
                 );
                 None
@@ -460,16 +502,16 @@ impl<'a> NameResolver<'a> {
                     },
                 );
             } else if inaccessible_items_with_same_name.len() == 1 {
-                // TODO; support statics and consts
-
                 let (star_import, item) = inaccessible_items_with_same_name.first().unwrap();
+
+                let item = **item;
 
                 let mut note_code_window =
                     CodeWindow::new(&self.files_infos[at], star_import.pkg_path_span.start);
 
                 note_code_window.mark_note(star_import.pkg_path_span, vec![]);
 
-                let item_kind_str = explicit_item_kind_to_str(item.kind());
+                let item_kind_str = explicit_item_kind_to_str(item);
 
                 let note = Diagnostic::note(
                     format!(
@@ -479,12 +521,10 @@ impl<'a> NameResolver<'a> {
                     vec![note_code_window],
                 );
 
-                let reason = if item.kind() == Item::FN {
-                    "لأنها خاصة بالحزمة التابعة لها"
-                } else if item.kind() == Item::CONST || item.kind() == Item::STATIC {
-                    "لأنه خاص بالحزمة التابع لها"
-                } else {
-                    unreachable!()
+                let reason = match item {
+                    Item::Const { .. } | Item::Static { .. } => "لأنه خاص بالحزمة التابع لها",
+                    Item::Fn { .. } => "لأنها خاصة بالحزمة التابعة لها",
+                    _ => unreachable!(),
                 };
 
                 let mut diagnostic =
@@ -650,14 +690,23 @@ impl<'a> NameResolver<'a> {
         resolved_item: Item,
         item_id: IdKey,
     ) -> bool {
-        if resolved_item.kind() == Item::PKG {
-            self.add_pkgs_cannot_be_imported_err(at, at_span);
-            false
-        } else if resolved_item.visibility() == Item::DEFAULT && item_pkg_key != at_pkg_key {
-            self.add_encapsulation_err(at, at_span, resolved_item, item_id);
-            false
-        } else {
-            true
+        match resolved_item {
+            Item::Pkg => {
+                self.add_pkgs_cannot_be_imported_err(at, at_span);
+                false
+            }
+            Item::UnitStruct { vis, .. }
+            | Item::TupleStruct { vis, .. }
+            | Item::FieldsStruct { vis, .. }
+            | Item::Const { vis, .. }
+            | Item::Static { vis, .. }
+            | Item::Fn { vis, .. }
+                if matches!(vis, VisModifier::Default) && item_pkg_key != at_pkg_key =>
+            {
+                self.add_encapsulation_err(at, at_span, resolved_item, item_id);
+                false
+            }
+            _ => true,
         }
     }
 
@@ -715,13 +764,14 @@ impl<'a> NameResolver<'a> {
 
         for (pkg_key, pkg_to_items) in self.ast.state.pkgs_to_items.iter_enumerated() {
             if let Some(found_item) = pkg_to_items.get(&id) {
-                if found_item.kind() == Item::PKG {
+                if matches!(found_item, Item::Pkg) {
                     continue;
                 }
-                let item_info = self.get_item_info(*found_item);
+                let found_item = *found_item;
+                let item_info = self.get_item_info(found_item);
                 let item_file = &self.files_infos[item_info.file_key];
                 let item_span_cursor = item_info.id_span.start;
-                let item_kind_str = item_kind_to_str(found_item.kind());
+                let item_kind_str = item_kind_to_str(found_item);
 
                 let pkg_name = self.fmt_pkg_name(pkg_key);
                 let name = &self.id_pool[id];
@@ -794,31 +844,30 @@ impl<'a> NameResolver<'a> {
     ) {
         let file_info = &self.files_infos[at];
         let name = &self.id_pool[name];
-        let item_kind = resolved_item.kind();
-        let msg = match item_kind {
-            Item::CONST => {
-                format!(
-                    "لا يمكن الوصول إلى الثابت `{}` لأنه خاص بالحزمة التابع لها",
-                    name
-                )
-            }
-            Item::STATIC => {
-                format!(
-                    "لا يمكن الوصول إلى المشترك `{}` لأنه خاص بالحزمة التابع لها",
-                    name
-                )
-            }
-            Item::UNIT_STRUCT | Item::TUPLE_STRUCT | Item::FIELDS_STRUCT => {
+        let msg = match resolved_item {
+            Item::UnitStruct { .. } | Item::TupleStruct { .. } | Item::FieldsStruct { .. } => {
                 format!(
                     "لا يمكن الوصول إلى الهيكل `{}` لأنه خاص بالحزمة التابع لها",
                     name
                 )
             }
-            Item::FN => format!(
+            Item::Const { .. } => {
+                format!(
+                    "لا يمكن الوصول إلى الثابت `{}` لأنه خاص بالحزمة التابع لها",
+                    name
+                )
+            }
+            Item::Static { .. } => {
+                format!(
+                    "لا يمكن الوصول إلى المشترك `{}` لأنه خاص بالحزمة التابع لها",
+                    name
+                )
+            }
+            Item::Fn { .. } => format!(
                 "لا يمكن الوصول إلى الدالة `{}` لأنها خاصة بالحزمة التابعة لها",
                 name
             ),
-            _ => {
+            Item::Pkg | Item::LocalVar => {
                 unreachable!()
             }
         };
@@ -845,8 +894,7 @@ impl<'a> NameResolver<'a> {
     }
 
     fn help_diagnostic_to_find_item(&self, item: Item) -> Diagnostic<'a> {
-        let item_kind = item.kind();
-        let item_kind_str = item_kind_to_str(item_kind);
+        let item_kind_str = item_kind_to_str(item);
         let help_msg = format!("تم العثور على ال{} هنا", item_kind_str);
         let resolved_item_info = self.get_item_info(item);
         let file_of_resolved_item = &self.files_infos[resolved_item_info.file_key];
@@ -857,15 +905,14 @@ impl<'a> NameResolver<'a> {
     }
 
     fn get_item_info(&self, item: Item) -> ItemInfo {
-        let idx = item.index();
-        match item.kind() {
-            Item::UNIT_STRUCT => self.ast.unit_structs[idx].info,
-            Item::TUPLE_STRUCT => self.ast.tuple_structs[idx].info,
-            Item::FIELDS_STRUCT => self.ast.fields_structs[idx].info,
-            Item::FN => self.ast.fns[idx].info,
-            Item::CONST => self.ast.consts[idx].info,
-            Item::STATIC => self.ast.statics[idx].info,
-            _ => {
+        match item {
+            nazmc_ast::Item::UnitStruct { key, .. } => self.ast.unit_structs[key].info,
+            nazmc_ast::Item::TupleStruct { key, .. } => self.ast.tuple_structs[key].info,
+            nazmc_ast::Item::FieldsStruct { key, .. } => self.ast.fields_structs[key].info,
+            nazmc_ast::Item::Const { key, .. } => self.ast.consts[key].info,
+            nazmc_ast::Item::Static { key, .. } => self.ast.statics[key].info,
+            nazmc_ast::Item::Fn { key, .. } => self.ast.fns[key].info,
+            nazmc_ast::Item::Pkg | nazmc_ast::Item::LocalVar => {
                 unreachable!()
             }
         }
@@ -881,30 +928,26 @@ impl<'a> NameResolver<'a> {
 }
 
 #[inline]
-fn item_kind_to_str(kind: u64) -> &'static str {
-    match kind {
-        Item::PKG => "حزمة",
-        Item::UNIT_STRUCT | Item::TUPLE_STRUCT | Item::FIELDS_STRUCT => "هيكل",
-        Item::CONST => "ثابت",
-        Item::STATIC => "مشترك",
-        Item::FN => "دالة",
-        _ => {
-            unreachable!()
-        }
+fn item_kind_to_str(item: Item) -> &'static str {
+    match item {
+        Item::Pkg => "حزمة",
+        Item::UnitStruct { .. } | Item::TupleStruct { .. } | Item::FieldsStruct { .. } => "هيكل",
+        Item::Const { .. } => "ثابت",
+        Item::Static { .. } => "مشترك",
+        Item::Fn { .. } => "دالة",
+        Item::LocalVar => unreachable!(),
     }
 }
 
-fn explicit_item_kind_to_str(kind: u64) -> &'static str {
-    match kind {
-        Item::PKG => "حزمة",
-        Item::UNIT_STRUCT => "هيكل وحدة",
-        Item::TUPLE_STRUCT => "هيكل تراتيب",
-        Item::FIELDS_STRUCT => "هيكل حقول",
-        Item::CONST => "ثابت",
-        Item::STATIC => "مشترك",
-        Item::FN => "دالة",
-        _ => {
-            unreachable!()
-        }
+fn explicit_item_kind_to_str(item: Item) -> &'static str {
+    match item {
+        Item::Pkg => "حزمة",
+        Item::UnitStruct { .. } => "هيكل وحدة",
+        Item::TupleStruct { .. } => "هيكل تراتيب",
+        Item::FieldsStruct { .. } => "هيكل حقول",
+        Item::Const { .. } => "ثابت",
+        Item::Static { .. } => "مشترك",
+        Item::Fn { .. } => "دالة",
+        Item::LocalVar => unreachable!(),
     }
 }

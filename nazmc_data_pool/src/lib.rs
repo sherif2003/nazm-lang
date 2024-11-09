@@ -7,7 +7,19 @@ use typed_index_collections::TiVec;
 macro_rules! new_data_pool_key {
     ($name: ident) => {
         #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Ord, PartialOrd, From, Into)]
-        pub struct $name(usize);
+        pub struct $name(u32);
+
+        impl From<usize> for $name {
+            fn from(value: usize) -> Self {
+                Self(value as u32)
+            }
+        }
+
+        impl From<$name> for usize {
+            fn from(value: $name) -> Self {
+                value.0 as Self
+            }
+        }
     };
 }
 
