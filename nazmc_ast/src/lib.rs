@@ -103,7 +103,7 @@ pub struct ASTPaths {
     /// The list of imports stms for each file
     pub imports: TiVec<FileKey, ThinVec<ImportStm>>,
     /// The list of star imports for each file
-    pub star_imports: TiVec<FileKey, ThinVec<PkgPath>>,
+    pub star_imports: TiVec<FileKey, ThinVec<StarImportStm>>,
     /// The list of all types paths
     pub types_paths: TiVec<TypePathKey, ItemPath>,
     /// The list of all unit struct expressions paths
@@ -132,8 +132,15 @@ pub struct PkgPath {
 
 #[derive(Clone)]
 pub struct ItemPath {
+    pub top_pkg_span: Option<Span>,
     pub pkg_path: PkgPath,
     pub item: ASTId,
+}
+
+#[derive(Clone)]
+pub struct StarImportStm {
+    pub top_pkg_span: Option<Span>,
+    pub pkg_path: PkgPath,
 }
 
 #[derive(Clone)]

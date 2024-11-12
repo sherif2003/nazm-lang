@@ -91,14 +91,15 @@ impl<'a> ASTValidator<'a> {
 
         let mut import_all = false;
 
-        if let Ok(id) = import_stm.top {
-            pkg_path.ids.push(id.data.val);
-            pkg_path.spans.push(id.span);
-        } else {
-            unreachable!()
-        };
+        let top_pkg_span = if let Ok(s) = import_stm.sec {
+            let span = if let Some(id) = import_stm.top {
+                pkg_path.ids.push(id.data.val);
+                pkg_path.spans.push(id.span);
+                None
+            } else {
+                Some(s.double_colons.span)
+            };
 
-        if let Ok(s) = import_stm.sec {
             match s.seg.unwrap() {
                 syntax::PathSegInImportStm::Id(id) => {
                     pkg_path.ids.push(id.data.val);
@@ -106,6 +107,7 @@ impl<'a> ASTValidator<'a> {
                 }
                 syntax::PathSegInImportStm::Star(_) => import_all = true,
             }
+            span
         } else {
             unreachable!()
         };
@@ -121,7 +123,10 @@ impl<'a> ASTValidator<'a> {
         }
 
         if import_all {
-            self.ast.state.paths.star_imports[self.file_key].push(pkg_path);
+            self.ast.state.paths.star_imports[self.file_key].push(nazmc_ast::StarImportStm {
+                top_pkg_span,
+                pkg_path,
+            });
         } else {
             let item_id = pkg_path.ids.pop().unwrap();
             let item_span = pkg_path.spans.pop().unwrap();
@@ -153,7 +158,11 @@ impl<'a> ASTValidator<'a> {
             }
 
             self.ast.state.paths.imports[self.file_key].push(nazmc_ast::ImportStm {
-                item_path: nazmc_ast::ItemPath { pkg_path, item },
+                item_path: nazmc_ast::ItemPath {
+                    pkg_path,
+                    item,
+                    top_pkg_span,
+                },
                 alias,
             });
         }
@@ -630,7 +639,11 @@ impl<'a> ASTValidator<'a> {
             item
         };
 
-        nazmc_ast::ItemPath { pkg_path, item }
+        nazmc_ast::ItemPath {
+            pkg_path,
+            item,
+            top_pkg_span: simple_path.double_colons.map(|c| c.span),
+        }
     }
 
     #[inline]

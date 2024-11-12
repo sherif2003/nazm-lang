@@ -10,7 +10,7 @@ pub(crate) enum FileItem {
 #[derive(NazmcParse, Debug)]
 pub(crate) struct ImportStm {
     pub(crate) import_keyword: ImportKeyword,
-    pub(crate) top: ParseResult<Id>,
+    pub(crate) top: Option<Id>,
     pub(crate) sec: ParseResult<DoubleColonsWithPathSegInImportStm>,
     pub(crate) segs: Vec<DoubleColonsWithPathSegInImportStm>,
     pub(crate) alias: Option<ImportAlias>,

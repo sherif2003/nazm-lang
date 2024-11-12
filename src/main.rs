@@ -120,9 +120,12 @@ fn main() {
     let mut pkgs = PkgPoolBuilder::new();
     let top_pkg_key = pkgs.get_key(&ThinVec::new());
 
-    // Register the unit type name to index 0
-    // main fn id to index 1
-    // the implicit lambda param name to index 2
+    // Register
+    // the empty string to index 0
+    // the unit type name to index 1
+    // main fn id to index 2
+    // the implicit lambda param name to index 3
+    id_pool.get_key(&"".to_string());
     id_pool.get_key(&"()".to_string());
     id_pool.get_key(&"البداية".to_string());
     id_pool.get_key(&"س".to_string());

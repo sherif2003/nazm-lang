@@ -109,7 +109,8 @@ pub type IdPool = TiVec<IdKey, String>;
 pub type StrPool = TiVec<StrKey, String>;
 
 impl IdKey {
-    pub const UNIT: Self = Self(0);
-    pub const MAIN: Self = Self(1);
-    pub const IMPLICIT_LAMBDA_PARAM: Self = Self(2);
+    pub const EMPTY: Self = Self(0);
+    pub const UNIT: Self = Self(1);
+    pub const MAIN: Self = Self(2);
+    pub const IMPLICIT_LAMBDA_PARAM: Self = Self(3);
 }

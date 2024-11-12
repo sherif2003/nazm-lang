@@ -1,7 +1,7 @@
 use nazmc_ast::{
     ASTId, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey, Item, ItemInfo, ItemPath,
-    PathNoPkgKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey, TupleStructKey, TupleStructPathKey,
-    TypePathKey, UnitStructKey, UnitStructPathKey, VisModifier,
+    PathNoPkgKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey, StarImportStm, TupleStructKey,
+    TupleStructPathKey, TypePathKey, UnitStructKey, UnitStructPathKey, VisModifier,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -60,7 +60,7 @@ impl<'a> NameResolver<'a> {
                     .into_iter()
                     .map(|import| {
                         let resolved_item = self
-                            .resolve_non_pkg_item_path(file_key, import.item_path)
+                            .resolve_non_pkg_item_path(|_| true, "", file_key, import.item_path)
                             .unwrap_or_default();
                         (
                             import.alias.id,
@@ -77,23 +77,32 @@ impl<'a> NameResolver<'a> {
         let resolved_star_imports = paths
             .star_imports
             .into_iter()
-            .map(|pkgs_paths| {
-                pkgs_paths
+            .map(|star_imports_stms| {
+                star_imports_stms
                     .into_iter()
-                    .map(|pkg_path| {
-                        let span = pkg_path
-                            .spans
-                            .first()
-                            .unwrap()
-                            .merged_with(&pkg_path.spans.last().unwrap());
+                    .map(
+                        |StarImportStm {
+                             top_pkg_span,
+                             pkg_path,
+                         }| {
+                            let start_span =
+                                top_pkg_span.unwrap_or_else(|| *pkg_path.spans.first().unwrap());
 
-                        let resolved_pkg_key = self.resolve_pkg_path(pkg_path).unwrap_or_default();
+                            let pkg_path_span = if let Some(span) = pkg_path.spans.last() {
+                                start_span.merged_with(&span)
+                            } else {
+                                start_span
+                            };
 
-                        ResolvedStarImport {
-                            pkg_path_span: span,
-                            resolved_pkg_key,
-                        }
-                    })
+                            let resolved_pkg_key =
+                                self.resolve_pkg_path(pkg_path).unwrap_or_default();
+
+                            ResolvedStarImport {
+                                pkg_path_span,
+                                resolved_pkg_key,
+                            }
+                        },
+                    )
                     .collect()
             })
             .collect::<TiVec<FileKey, ThinVec<_>>>();
@@ -348,27 +357,45 @@ impl<'a> NameResolver<'a> {
         }
     }
 
-    fn resolve_non_pkg_item_path(&mut self, at: FileKey, item_path: ItemPath) -> Option<Item> {
-        let item_id = item_path.item.id;
+    fn resolve_non_pkg_item_path(
+        &mut self,
+        predicate_kind: impl Fn(Item) -> bool,
+        expected_kind: &str,
+        at: FileKey,
+        item_path: ItemPath,
+    ) -> Option<Item> {
+        let ASTId {
+            span: item_path_span,
+            id: item_path_id,
+        } = item_path.item;
 
         let at_span = item_path
             .pkg_path
             .spans
             .first()
-            .unwrap_or(&item_path.item.span)
-            .merged_with(&item_path.item.span);
+            .unwrap_or(&item_path_span)
+            .merged_with(&item_path_span);
 
         let at_pkg_key = item_path.pkg_path.pkg_key;
 
         let (item_pkg_key, resolved_item) = self.resolve_item_path(item_path)?;
 
-        if self.check_resolved_item(
+        if !predicate_kind(resolved_item) {
+            self.add_unexpected_item_kind_err(
+                at,
+                item_path_span,
+                expected_kind,
+                explicit_item_kind_to_str(resolved_item),
+                resolved_item,
+            );
+            None
+        } else if self.check_resolved_item(
             at,
             at_span,
             at_pkg_key,
             item_pkg_key,
             resolved_item,
-            item_id,
+            item_path_id,
         ) {
             Some(resolved_item)
         } else {
@@ -385,7 +412,7 @@ impl<'a> NameResolver<'a> {
         predicate_kind: impl Fn(Item) -> bool,
         expected_kind: &str,
     ) -> Option<Item> {
-        if item_path.pkg_path.ids.is_empty() {
+        if item_path.pkg_path.ids.is_empty() && item_path.top_pkg_span.is_none() {
             self.resolve_item_path_with_no_pkg_path(
                 at,
                 item_path.item,
@@ -396,7 +423,7 @@ impl<'a> NameResolver<'a> {
                 expected_kind,
             )
         } else {
-            self.resolve_non_pkg_item_path(at, item_path)
+            self.resolve_non_pkg_item_path(predicate_kind, expected_kind, at, item_path)
         }
     }
 
@@ -414,9 +441,7 @@ impl<'a> NameResolver<'a> {
             return Some(item.resolved_item);
         }
 
-        if let Some(item) =
-            self.ast.state.pkgs_to_items[nazmc_ast::TOP_PKG_KEY].get(&item_ast_id.id)
-        {
+        if let Some(item) = self.ast.state.pkgs_to_items[item_path_pkg_key].get(&item_ast_id.id) {
             return if predicate_kind(*item) {
                 Some(*item)
             } else {
@@ -641,6 +666,7 @@ impl<'a> NameResolver<'a> {
         ItemPath {
             pkg_path,
             item: item_ast_id,
+            top_pkg_span: _,
         }: ItemPath,
     ) -> Option<(PkgKey, Item)> {
         let empty_path = pkg_path.ids.is_empty();

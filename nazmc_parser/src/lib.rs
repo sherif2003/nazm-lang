@@ -390,11 +390,6 @@ impl<'a> ParseErrorsReporter<'a> {
     }
 
     fn check_import_stm(&mut self, import_stm: &ImportStm) {
-        if let Err(err) = &import_stm.top {
-            self.report_expected("اسم حزمة", err, vec![]);
-            return;
-        }
-
         let mut last_star_symbol_span = None;
 
         match &import_stm.sec {
@@ -404,19 +399,20 @@ impl<'a> ParseErrorsReporter<'a> {
                         last_star_symbol_span = Some(s.span)
                     }
                 }
-                Err(err) => self.report_expected("اسم أو *", err, vec![]),
+                Err(err) => self.report_expected("اسم أو `*`", err, vec![]),
             },
-            Err(_) => {
-                self.report(
-                    "يُتوقع `::` ثم اسم عنصر أو `*` بعد الحزمة".to_string(),
-                    if let Ok(t) = &import_stm.top {
-                        t.span
-                    } else {
-                        unreachable!()
-                    },
-                    "قُم بعدها بإضافة `::` ثم اسم عنصر أو `*`".to_string(),
-                    vec![],
-                );
+            Err(err) => {
+                if let Some(id) = &import_stm.top {
+                    self.report(
+                        "يُتوقع `::` ثم اسم عنصر أو `*` بعد الحزمة".to_string(),
+                        id.span,
+                        "قُم بعدها بإضافة `::` ثم اسم عنصر أو `*`".to_string(),
+                        vec![],
+                    );
+                } else {
+                    self.report_expected("اسم أو `::`", err, vec![])
+                }
+
                 return;
             }
         }
@@ -437,17 +433,9 @@ impl<'a> ParseErrorsReporter<'a> {
                         last_star_symbol_span = Some(s.span)
                     }
                 }
-                Err(_) => {
-                    self.report(
-                        "يُتوقع `::` ثم اسم عنصر أو `*` بعد الحزمة".to_string(),
-                        if let Ok(t) = &import_stm.top {
-                            t.span
-                        } else {
-                            unreachable!()
-                        },
-                        "قُم بعدها بإضافة `::` ثم اسم عنصر أو `*`".to_string(),
-                        vec![],
-                    );
+                Err(err) => {
+                    self.report_expected("اسم أو `*`", err, vec![]);
+                    return;
                 }
             }
         }
