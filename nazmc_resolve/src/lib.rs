@@ -1,7 +1,7 @@
 use nazmc_ast::{
     ASTId, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey, Item, ItemInfo, ItemPath,
-    PathNoPkgKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey, StarImportStm, TupleStructKey,
-    TupleStructPathKey, TypePathKey, UnitStructKey, UnitStructPathKey, VisModifier,
+    PathNoPkgKey, PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey, StarImportStm,
+    TupleStructKey, TupleStructPathKey, UnitStructKey, UnitStructPathKey, VisModifier,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -130,7 +130,7 @@ impl<'a> NameResolver<'a> {
                 )
                 .unwrap_or_default()
             })
-            .collect::<TiVec<TypePathKey, Item>>();
+            .collect::<TiVec<PathTypeExprKey, Item>>();
 
         let resolved_unit_structs_exprs = paths
             .unit_structs_paths_exprs

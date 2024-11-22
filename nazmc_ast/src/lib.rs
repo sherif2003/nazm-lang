@@ -8,17 +8,28 @@ use nazmc_data_pool::{
 use nazmc_diagnostics::span::{Span, SpanCursor};
 use std::collections::HashMap;
 use thin_vec::ThinVec;
+pub use typ::*;
 mod item;
+mod typ;
 
 new_data_pool_key! { FileKey }
 new_data_pool_key! { PkgKey }
-new_data_pool_key! { TypePathKey }
 new_data_pool_key! { UnitStructPathKey }
 new_data_pool_key! { TupleStructPathKey }
 new_data_pool_key! { FieldsStructPathKey }
 new_data_pool_key! { PathNoPkgKey }
 new_data_pool_key! { PathWithPkgKey }
-new_data_pool_key! { TypeExprKey }
+
+new_data_pool_key! { PathTypeExprKey }
+new_data_pool_key! { ParenTypeExprKey }
+new_data_pool_key! { SliceTypeExprKey }
+new_data_pool_key! { PtrTypeExprKey }
+new_data_pool_key! { RefTypeExprKey }
+new_data_pool_key! { PtrMutTypeExprKey }
+new_data_pool_key! { RefMutTypeExprKey }
+new_data_pool_key! { TupleTypeExprKey }
+new_data_pool_key! { ArrayTypeExprKey }
+new_data_pool_key! { LambdaTypeExprKey }
 
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
@@ -46,7 +57,7 @@ pub struct Unresolved {
 /// Holds resolved paths
 pub struct Resolved {
     /// The list of all types paths
-    pub types_paths: TiVec<TypePathKey, Item>,
+    pub types_paths: TiVec<PathTypeExprKey, Item>,
     /// The list of all unit struct expressions paths
     pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, UnitStructKey>,
     /// The list of all tuple struct expressions paths
@@ -64,7 +75,7 @@ pub struct AST<S> {
     /// The state of AST: may be `Unresolved` or `Resolved`
     pub state: S,
     /// All types
-    pub types: TiVec<TypeExprKey, Type>,
+    pub types: TypesExprs,
     /// All consts
     pub consts: TiVec<ConstKey, Const>,
     /// All statics
@@ -111,7 +122,7 @@ pub struct ASTPaths {
     /// The list of star imports for each file
     pub star_imports: TiVec<FileKey, ThinVec<StarImportStm>>,
     /// The list of all types paths
-    pub types_paths: TiVec<TypePathKey, ItemPath>,
+    pub types_paths: TiVec<PathTypeExprKey, ItemPath>,
     /// The list of all unit struct expressions paths
     pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, ItemPath>,
     /// The list of all tuple struct expressions paths
@@ -164,7 +175,7 @@ pub struct ASTId {
 #[derive(Clone)]
 pub struct Binding {
     pub kind: BindingKind,
-    pub typ: Option<TypeExprKey>,
+    pub typ: Option<Type>,
 }
 
 #[derive(Clone)]
@@ -206,20 +217,6 @@ pub fn expand_names_binding_owned(kind: &BindingKind, bound_names: &mut Vec<IdKe
     }
 }
 
-#[derive(Clone)]
-pub enum Type {
-    Path(TypePathKey),
-    Tuple(ThinVec<TypeExprKey>, Span),
-    Paren(TypeExprKey, Span),
-    Slice(TypeExprKey, Span),
-    Array(TypeExprKey, Box<Expr>, Span),
-    Ptr(TypeExprKey, Span),
-    Ref(TypeExprKey, Span),
-    PtrMut(TypeExprKey, Span),
-    RefMut(TypeExprKey, Span),
-    Lambda(ThinVec<TypeExprKey>, TypeExprKey, Span),
-}
-
 #[derive(Clone, Copy, Default)]
 pub enum VisModifier {
     #[default]
@@ -237,14 +234,14 @@ pub struct ItemInfo {
 #[derive(Clone)]
 pub struct Const {
     pub info: ItemInfo,
-    pub typ: TypeExprKey,
+    pub typ: Type,
     pub expr: Expr,
 }
 
 #[derive(Clone)]
 pub struct Static {
     pub info: ItemInfo,
-    pub typ: TypeExprKey,
+    pub typ: Type,
     pub expr: Expr,
 }
 
@@ -256,7 +253,7 @@ pub struct UnitStruct {
 #[derive(Clone)]
 pub struct TupleStruct {
     pub info: ItemInfo,
-    pub types: ThinVec<(VisModifier, TypeExprKey)>,
+    pub types: ThinVec<(VisModifier, Type)>,
 }
 
 #[derive(Clone)]
@@ -269,14 +266,14 @@ pub struct FieldsStruct {
 pub struct FieldInfo {
     pub vis: VisModifier,
     pub id_span: Span,
-    pub typ: TypeExprKey,
+    pub typ: Type,
 }
 
 #[derive(Clone)]
 pub struct Fn {
     pub info: ItemInfo,
-    pub params: ThinVec<(ASTId, TypeExprKey)>,
-    pub return_type: TypeExprKey,
+    pub params: ThinVec<(ASTId, Type)>,
+    pub return_type: Type,
 }
 
 #[derive(Clone, Default)]
