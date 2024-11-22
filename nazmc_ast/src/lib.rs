@@ -18,6 +18,7 @@ new_data_pool_key! { TupleStructPathKey }
 new_data_pool_key! { FieldsStructPathKey }
 new_data_pool_key! { PathNoPkgKey }
 new_data_pool_key! { PathWithPkgKey }
+new_data_pool_key! { TypeExprKey }
 
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
@@ -62,6 +63,8 @@ pub struct Resolved {
 pub struct AST<S> {
     /// The state of AST: may be `Unresolved` or `Resolved`
     pub state: S,
+    /// All types
+    pub types: TiVec<TypeExprKey, Type>,
     /// All consts
     pub consts: TiVec<ConstKey, Const>,
     /// All statics
@@ -161,7 +164,7 @@ pub struct ASTId {
 #[derive(Clone)]
 pub struct Binding {
     pub kind: BindingKind,
-    pub typ: Option<Type>,
+    pub typ: Option<TypeExprKey>,
 }
 
 #[derive(Clone)]
@@ -206,15 +209,15 @@ pub fn expand_names_binding_owned(kind: &BindingKind, bound_names: &mut Vec<IdKe
 #[derive(Clone)]
 pub enum Type {
     Path(TypePathKey),
-    Tuple(ThinVec<Type>, Span),
-    Paren(Box<Type>, Span),
-    Slice(Box<Type>, Span),
-    Array(Box<Type>, Box<Expr>, Span),
-    Ptr(Box<Type>, Span),
-    Ref(Box<Type>, Span),
-    PtrMut(Box<Type>, Span),
-    RefMut(Box<Type>, Span),
-    Lambda(ThinVec<Type>, Box<Type>, Span),
+    Tuple(ThinVec<TypeExprKey>, Span),
+    Paren(TypeExprKey, Span),
+    Slice(TypeExprKey, Span),
+    Array(TypeExprKey, Box<Expr>, Span),
+    Ptr(TypeExprKey, Span),
+    Ref(TypeExprKey, Span),
+    PtrMut(TypeExprKey, Span),
+    RefMut(TypeExprKey, Span),
+    Lambda(ThinVec<TypeExprKey>, TypeExprKey, Span),
 }
 
 #[derive(Clone, Copy, Default)]
@@ -234,14 +237,14 @@ pub struct ItemInfo {
 #[derive(Clone)]
 pub struct Const {
     pub info: ItemInfo,
-    pub typ: Type,
+    pub typ: TypeExprKey,
     pub expr: Expr,
 }
 
 #[derive(Clone)]
 pub struct Static {
     pub info: ItemInfo,
-    pub typ: Type,
+    pub typ: TypeExprKey,
     pub expr: Expr,
 }
 
@@ -253,7 +256,7 @@ pub struct UnitStruct {
 #[derive(Clone)]
 pub struct TupleStruct {
     pub info: ItemInfo,
-    pub types: ThinVec<(VisModifier, Type)>,
+    pub types: ThinVec<(VisModifier, TypeExprKey)>,
 }
 
 #[derive(Clone)]
@@ -266,14 +269,14 @@ pub struct FieldsStruct {
 pub struct FieldInfo {
     pub vis: VisModifier,
     pub id_span: Span,
-    pub typ: Type,
+    pub typ: TypeExprKey,
 }
 
 #[derive(Clone)]
 pub struct Fn {
     pub info: ItemInfo,
-    pub params: ThinVec<(ASTId, Type)>,
-    pub return_type: Type,
+    pub params: ThinVec<(ASTId, TypeExprKey)>,
+    pub return_type: TypeExprKey,
 }
 
 #[derive(Clone, Default)]

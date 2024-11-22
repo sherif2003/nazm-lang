@@ -395,10 +395,11 @@ impl<'a> ASTValidator<'a> {
                     let return_type = if let Some(ColonWithType { colon: _, typ }) = f.return_type {
                         self.lower_type(typ.unwrap())
                     } else {
-                        nazmc_ast::Type::Tuple(
+                        let typ = nazmc_ast::Type::Tuple(
                             ThinVec::new(),
                             f.body.as_ref().unwrap().open_curly.span,
-                        )
+                        );
+                        self.ast.types.push_and_get_key(typ)
                     };
 
                     let scope_key = self.lower_lambda_as_body(f.body.unwrap());
@@ -462,7 +463,7 @@ impl<'a> ASTValidator<'a> {
     fn lower_tuple_struct_field(
         &mut self,
         field: TupleStructField,
-    ) -> (nazmc_ast::VisModifier, nazmc_ast::Type) {
+    ) -> (nazmc_ast::VisModifier, nazmc_ast::TypeExprKey) {
         let vis = match field.visibility {
             Some(Terminal {
                 data: syntax::VisModifierToken::Public,
@@ -505,7 +506,7 @@ impl<'a> ASTValidator<'a> {
         )
     }
 
-    fn lower_fn_param(&mut self, param: FnParam) -> (nazmc_ast::ASTId, nazmc_ast::Type) {
+    fn lower_fn_param(&mut self, param: FnParam) -> (nazmc_ast::ASTId, nazmc_ast::TypeExprKey) {
         let name = nazmc_ast::ASTId {
             span: param.name.span,
             id: param.name.data.val,
@@ -516,15 +517,15 @@ impl<'a> ASTValidator<'a> {
         (name, typ)
     }
 
-    fn lower_type(&mut self, typ: Type) -> nazmc_ast::Type {
-        match typ {
+    fn lower_type(&mut self, typ: Type) -> nazmc_ast::TypeExprKey {
+        let typ = match typ {
             Type::Path(simple_path) => {
                 let item_path = self.lower_simple_path(simple_path);
                 let type_path_key = self.ast.state.paths.types_paths.push_and_get_key(item_path);
                 nazmc_ast::Type::Path(type_path_key)
             }
             Type::Ptr(ptr_type) => {
-                let underlying_typ = Box::new(self.lower_type(ptr_type.typ.unwrap()));
+                let underlying_typ = self.lower_type(ptr_type.typ.unwrap());
                 let star_span = ptr_type.star.span;
                 if let Some(mut_) = ptr_type.mut_keyword {
                     nazmc_ast::Type::PtrMut(underlying_typ, star_span.merged_with(&mut_.span))
@@ -533,7 +534,7 @@ impl<'a> ASTValidator<'a> {
                 }
             }
             Type::Ref(ref_type) => {
-                let underlying_typ = Box::new(self.lower_type(ref_type.typ.unwrap()));
+                let underlying_typ = self.lower_type(ref_type.typ.unwrap());
                 let hash_span = ref_type.hash.span;
                 if let Some(mut_) = ref_type.mut_keyword {
                     nazmc_ast::Type::RefMut(underlying_typ, hash_span.merged_with(&mut_.span))
@@ -542,7 +543,7 @@ impl<'a> ASTValidator<'a> {
                 }
             }
             Type::Slice(slice_type) => {
-                let underlying_typ = Box::new(self.lower_type(slice_type.typ.unwrap()));
+                let underlying_typ = self.lower_type(slice_type.typ.unwrap());
                 let brackets_span = slice_type
                     .open_bracket
                     .span
@@ -576,9 +577,9 @@ impl<'a> ASTValidator<'a> {
                 }
 
                 if let Some(lambda_type) = paren_type.lambda {
-                    let return_type = Box::new(self.lower_type(lambda_type.typ.unwrap()));
+                    let return_type = self.lower_type(lambda_type.typ.unwrap());
 
-                    let span = match return_type.as_ref() {
+                    let span = match &self.ast.types[return_type] {
                         nazmc_ast::Type::Path(type_path_key) => {
                             self.ast.state.paths.types_paths[*type_path_key].item.span
                         }
@@ -602,13 +603,15 @@ impl<'a> ASTValidator<'a> {
                         .merged_with(&paren_type.tuple.close_delim.unwrap().span);
 
                     if !trailing_comma_in_types && types.len() == 1 {
-                        nazmc_ast::Type::Paren(Box::new(types.pop().unwrap()), parens_span)
+                        nazmc_ast::Type::Paren(types.pop().unwrap(), parens_span)
                     } else {
                         nazmc_ast::Type::Tuple(types, parens_span)
                     }
                 }
             }
-        }
+        };
+
+        self.ast.types.push_and_get_key(typ)
     }
 
     fn lower_simple_path(&mut self, mut simple_path: SimplePath) -> nazmc_ast::ItemPath {

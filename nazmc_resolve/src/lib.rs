@@ -279,6 +279,7 @@ impl<'a> NameResolver<'a> {
 
         nazmc_ast::AST {
             state,
+            types: self.ast.types,
             consts: self.ast.consts,
             statics: self.ast.statics,
             unit_structs: self.ast.unit_structs,
