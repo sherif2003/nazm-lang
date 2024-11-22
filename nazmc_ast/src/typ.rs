@@ -2,6 +2,8 @@ use crate::*;
 
 #[derive(Clone, Default)]
 pub struct TypesExprs {
+    pub all: TiVec<TypeExprKey, TypeExpr>,
+    pub paths: TiVec<PathTypeExprKey, ItemPath>,
     pub parens: TiVec<ParenTypeExprKey, ParenTypeExpr>,
     pub slices: TiVec<SliceTypeExprKey, SliceTypeExpr>,
     pub ptrs: TiVec<PtrTypeExprKey, PtrTypeExpr>,
@@ -14,7 +16,7 @@ pub struct TypesExprs {
 }
 
 #[derive(Clone)]
-pub enum Type {
+pub enum TypeExpr {
     Path(PathTypeExprKey),
     Paren(ParenTypeExprKey),
     Slice(SliceTypeExprKey),
@@ -29,56 +31,96 @@ pub enum Type {
 
 #[derive(Clone)]
 pub struct ParenTypeExpr {
-    pub underlying_typ: Type,
+    pub underlying_typ: TypeExprKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct SliceTypeExpr {
-    pub underlying_typ: Type,
+    pub underlying_typ: TypeExprKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct PtrTypeExpr {
-    pub underlying_typ: Type,
+    pub underlying_typ: TypeExprKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct RefTypeExpr {
-    pub underlying_typ: Type,
+    pub underlying_typ: TypeExprKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct PtrMutTypeExpr {
-    pub underlying_typ: Type,
+    pub underlying_typ: TypeExprKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct RefMutTypeExpr {
-    pub underlying_typ: Type,
+    pub underlying_typ: TypeExprKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct TupleTypeExpr {
-    pub types: ThinVec<Type>,
+    pub types: ThinVec<TypeExprKey>,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct ArrayTypeExpr {
-    pub underlying_typ: Type,
+    pub underlying_typ: TypeExprKey,
     pub size_expr: Expr,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct LambdaTypeExpr {
-    pub params_types: ThinVec<Type>,
-    pub return_type: Type,
+    pub params_types: ThinVec<TypeExprKey>,
+    pub return_type: TypeExprKey,
     pub span: Span,
+}
+
+#[derive(Clone, Default)]
+pub struct Types {
+    pub all: TiVec<TypeKey, Type>,
+    pub tuples: TiVec<TupleTypeKey, TupleType>,
+    pub arrays: TiVec<ArrayTypeKey, ArrayType>,
+    pub lambdas: TiVec<LambdaTypeKey, LambdaType>,
+}
+
+#[derive(Clone)]
+pub enum Type {
+    UnitStruct(UnitStructKey),
+    TupleStruct(TupleStructKey),
+    FieldsStruct(FieldsStructKey),
+    Slice(TypeKey),
+    Ptr(TypeKey),
+    Ref(TypeKey),
+    PtrMut(TypeKey),
+    RefMut(TypeKey),
+    Tuple(TupleTypeKey),
+    Array(ArrayTypeKey),
+    Lambda(LambdaTypeKey),
+}
+
+#[derive(Clone)]
+pub struct TupleType {
+    pub types: ThinVec<TypeKey>,
+}
+
+#[derive(Clone, Copy)]
+pub struct ArrayType {
+    pub underlying_typ: TypeKey,
+    pub size: u32,
+}
+
+#[derive(Clone)]
+pub struct LambdaType {
+    pub params_types: ThinVec<TypeKey>,
+    pub return_type: TypeKey,
 }

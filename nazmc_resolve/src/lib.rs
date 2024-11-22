@@ -107,8 +107,7 @@ impl<'a> NameResolver<'a> {
             })
             .collect::<TiVec<FileKey, ThinVec<_>>>();
 
-        let resolved_types_paths = paths
-            .types_paths
+        let resolved_types_paths = std::mem::take(&mut self.ast.state.types.paths)
             .into_iter()
             .map(|item_path| {
                 let file_key = item_path.pkg_path.file_key;
@@ -269,7 +268,7 @@ impl<'a> NameResolver<'a> {
         }
 
         let state = nazmc_ast::Resolved {
-            types_paths: resolved_types_paths,
+            types: todo!(),
             unit_structs_paths_exprs: resolved_unit_structs_exprs,
             tuple_structs_paths_exprs: resolved_tuple_structs_exprs,
             field_structs_paths_exprs: resolved_field_structs_exprs,
@@ -279,7 +278,6 @@ impl<'a> NameResolver<'a> {
 
         nazmc_ast::AST {
             state,
-            types: self.ast.types,
             consts: self.ast.consts,
             statics: self.ast.statics,
             unit_structs: self.ast.unit_structs,

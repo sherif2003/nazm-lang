@@ -20,6 +20,7 @@ new_data_pool_key! { FieldsStructPathKey }
 new_data_pool_key! { PathNoPkgKey }
 new_data_pool_key! { PathWithPkgKey }
 
+new_data_pool_key! { TypeExprKey }
 new_data_pool_key! { PathTypeExprKey }
 new_data_pool_key! { ParenTypeExprKey }
 new_data_pool_key! { SliceTypeExprKey }
@@ -31,9 +32,13 @@ new_data_pool_key! { TupleTypeExprKey }
 new_data_pool_key! { ArrayTypeExprKey }
 new_data_pool_key! { LambdaTypeExprKey }
 
+new_data_pool_key! { TypeKey }
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
 new_data_pool_key! { FieldsStructKey }
+new_data_pool_key! { TupleTypeKey }
+new_data_pool_key! { ArrayTypeKey }
+new_data_pool_key! { LambdaTypeKey }
 new_data_pool_key! { ConstKey }
 new_data_pool_key! { StaticKey }
 new_data_pool_key! { FnKey }
@@ -52,12 +57,14 @@ pub struct Unresolved {
     pub paths: ASTPaths,
     /// All scope events
     pub scope_events: TiVec<ScopeKey, ThinVec<ScopeEvent>>,
+    /// All types exprs
+    pub types: TypesExprs,
 }
 
 /// Holds resolved paths
 pub struct Resolved {
-    /// The list of all types paths
-    pub types_paths: TiVec<PathTypeExprKey, Item>,
+    /// All types
+    pub types: Types,
     /// The list of all unit struct expressions paths
     pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, UnitStructKey>,
     /// The list of all tuple struct expressions paths
@@ -74,8 +81,6 @@ pub struct Resolved {
 pub struct AST<S> {
     /// The state of AST: may be `Unresolved` or `Resolved`
     pub state: S,
-    /// All types
-    pub types: TypesExprs,
     /// All consts
     pub consts: TiVec<ConstKey, Const>,
     /// All statics
@@ -121,8 +126,6 @@ pub struct ASTPaths {
     pub imports: TiVec<FileKey, ThinVec<ImportStm>>,
     /// The list of star imports for each file
     pub star_imports: TiVec<FileKey, ThinVec<StarImportStm>>,
-    /// The list of all types paths
-    pub types_paths: TiVec<PathTypeExprKey, ItemPath>,
     /// The list of all unit struct expressions paths
     pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, ItemPath>,
     /// The list of all tuple struct expressions paths
@@ -175,7 +178,7 @@ pub struct ASTId {
 #[derive(Clone)]
 pub struct Binding {
     pub kind: BindingKind,
-    pub typ: Option<Type>,
+    pub typ: Option<TypeExprKey>,
 }
 
 #[derive(Clone)]
@@ -234,14 +237,14 @@ pub struct ItemInfo {
 #[derive(Clone)]
 pub struct Const {
     pub info: ItemInfo,
-    pub typ: Type,
+    pub typ: TypeExprKey,
     pub expr: Expr,
 }
 
 #[derive(Clone)]
 pub struct Static {
     pub info: ItemInfo,
-    pub typ: Type,
+    pub typ: TypeExprKey,
     pub expr: Expr,
 }
 
@@ -253,7 +256,7 @@ pub struct UnitStruct {
 #[derive(Clone)]
 pub struct TupleStruct {
     pub info: ItemInfo,
-    pub types: ThinVec<(VisModifier, Type)>,
+    pub types: ThinVec<(VisModifier, TypeExprKey)>,
 }
 
 #[derive(Clone)]
@@ -266,14 +269,14 @@ pub struct FieldsStruct {
 pub struct FieldInfo {
     pub vis: VisModifier,
     pub id_span: Span,
-    pub typ: Type,
+    pub typ: TypeExprKey,
 }
 
 #[derive(Clone)]
 pub struct Fn {
     pub info: ItemInfo,
-    pub params: ThinVec<(ASTId, Type)>,
-    pub return_type: Type,
+    pub params: ThinVec<(ASTId, TypeExprKey)>,
+    pub return_type: TypeExprKey,
 }
 
 #[derive(Clone, Default)]
