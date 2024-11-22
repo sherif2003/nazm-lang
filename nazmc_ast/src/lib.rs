@@ -38,6 +38,8 @@ pub struct Unresolved {
     pub pkgs_to_items: TiVec<PkgKey, HashMap<IdKey, Item>>,
     /// All paths that should be resolved
     pub paths: ASTPaths,
+    /// All scope events
+    pub scope_events: TiVec<ScopeKey, ThinVec<ScopeEvent>>,
 }
 
 /// Holds resolved paths
@@ -89,6 +91,7 @@ impl AST<Unresolved> {
                 star_imports: ti_vec![ThinVec::new(); files_len],
                 ..Default::default()
             },
+            ..Default::default()
         };
 
         Self {
@@ -276,7 +279,6 @@ pub struct Fn {
 #[derive(Clone, Default)]
 pub struct Scope {
     pub extra_params: Vec<IdKey>,
-    pub events: ThinVec<ScopeEvent>,
     pub stms: ThinVec<Stm>,
     pub return_expr: Option<Expr>,
 }

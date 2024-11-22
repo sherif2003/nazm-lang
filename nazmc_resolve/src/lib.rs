@@ -307,7 +307,7 @@ impl<'a> NameResolver<'a> {
             names_stack.push(*name);
         }
 
-        'label: for event in std::mem::take(&mut self.ast.scopes[scope_key].events) {
+        'label: for event in std::mem::take(&mut self.ast.state.scope_events[scope_key]) {
             match event {
                 nazmc_ast::ScopeEvent::Let(let_stm_key) => {
                     let let_stm = &self.ast.lets[let_stm_key];

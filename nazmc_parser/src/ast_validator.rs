@@ -659,6 +659,7 @@ impl<'a> ASTValidator<'a> {
         let scope = nazmc_ast::Scope::default();
         let last_scope_key = self.current_scope_key;
         self.current_scope_key = self.ast.scopes.push_and_get_key(scope);
+        self.ast.state.scope_events.push(ThinVec::new());
 
         for stm in stms {
             let stm = match stm.unwrap() {
@@ -680,8 +681,7 @@ impl<'a> ASTValidator<'a> {
 
                     let let_stm_key = self.ast.lets.push_and_get_key(let_stm);
 
-                    self.ast.scopes[self.current_scope_key]
-                        .events
+                    self.ast.state.scope_events[self.current_scope_key]
                         .push(nazmc_ast::ScopeEvent::Let(let_stm_key));
 
                     nazmc_ast::Stm::Let(let_stm_key)
@@ -1075,8 +1075,7 @@ impl<'a> ASTValidator<'a> {
                         .paths_no_pkgs_exprs
                         .push_and_get_key((item_path.item, item_path.pkg_path.pkg_key));
 
-                    self.ast.scopes[self.current_scope_key]
-                        .events
+                    self.ast.state.scope_events[self.current_scope_key]
                         .push(nazmc_ast::ScopeEvent::Path(path_key));
 
                     nazmc_ast::ExprKind::PathNoPkg(path_key)
@@ -1367,8 +1366,7 @@ impl<'a> ASTValidator<'a> {
                 .paths_no_pkgs_exprs
                 .push_and_get_key((item, self.pkg_key));
 
-            self.ast.scopes[self.current_scope_key]
-                .events
+            self.ast.state.scope_events[self.current_scope_key]
                 .push(nazmc_ast::ScopeEvent::Path(path_key));
 
             nazmc_ast::Expr {
@@ -1441,8 +1439,7 @@ impl<'a> ASTValidator<'a> {
         let if_condition = self.lower_expr(if_expr.conditional_block.condition.unwrap());
         let if_body = self.lower_lambda_as_body(if_expr.conditional_block.block.unwrap());
 
-        self.ast.scopes[self.current_scope_key]
-            .events
+        self.ast.state.scope_events[self.current_scope_key]
             .push(nazmc_ast::ScopeEvent::Scope(if_body));
 
         let if_ = (if_condition, if_body);
@@ -1453,8 +1450,7 @@ impl<'a> ASTValidator<'a> {
             let condition = self.lower_expr(else_if.conditional_block.condition.unwrap());
             let body = self.lower_lambda_as_body(else_if.conditional_block.block.unwrap());
 
-            self.ast.scopes[self.current_scope_key]
-                .events
+            self.ast.state.scope_events[self.current_scope_key]
                 .push(nazmc_ast::ScopeEvent::Scope(body));
 
             else_ifs.push((condition, body));
@@ -1462,8 +1458,7 @@ impl<'a> ASTValidator<'a> {
 
         let else_ = if_expr.else_cluase.map(|e| {
             let body = self.lower_lambda_as_body(e.block.unwrap());
-            self.ast.scopes[self.current_scope_key]
-                .events
+            self.ast.state.scope_events[self.current_scope_key]
                 .push(nazmc_ast::ScopeEvent::Scope(body));
             body
         });
