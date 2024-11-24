@@ -15,7 +15,7 @@ pub struct TypesExprs {
     pub lambdas: TiVec<LambdaTypeExprKey, LambdaTypeExpr>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum TypeExpr {
     Path(PathTypeExprKey),
     Paren(ParenTypeExprKey),
@@ -32,42 +32,49 @@ pub enum TypeExpr {
 #[derive(Clone)]
 pub struct ParenTypeExpr {
     pub underlying_typ: TypeExprKey,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct SliceTypeExpr {
     pub underlying_typ: TypeExprKey,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct PtrTypeExpr {
     pub underlying_typ: TypeExprKey,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct RefTypeExpr {
     pub underlying_typ: TypeExprKey,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct PtrMutTypeExpr {
     pub underlying_typ: TypeExprKey,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct RefMutTypeExpr {
     pub underlying_typ: TypeExprKey,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
 #[derive(Clone)]
 pub struct TupleTypeExpr {
     pub types: ThinVec<TypeExprKey>,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
@@ -75,6 +82,7 @@ pub struct TupleTypeExpr {
 pub struct ArrayTypeExpr {
     pub underlying_typ: TypeExprKey,
     pub size_expr: Expr,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
@@ -82,6 +90,7 @@ pub struct ArrayTypeExpr {
 pub struct LambdaTypeExpr {
     pub params_types: ThinVec<TypeExprKey>,
     pub return_type: TypeExprKey,
+    pub file_key: FileKey,
     pub span: Span,
 }
 
@@ -93,7 +102,7 @@ pub struct Types {
     pub lambdas: TiVec<LambdaTypeKey, LambdaType>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
     UnitStruct(UnitStructKey),
     TupleStruct(TupleStructKey),
@@ -108,18 +117,18 @@ pub enum Type {
     Lambda(LambdaTypeKey),
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TupleType {
     pub types: ThinVec<TypeKey>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ArrayType {
     pub underlying_typ: TypeKey,
     pub size: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LambdaType {
     pub params_types: ThinVec<TypeKey>,
     pub return_type: TypeKey,

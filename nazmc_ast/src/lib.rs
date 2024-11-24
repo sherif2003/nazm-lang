@@ -57,7 +57,7 @@ pub struct Unresolved {
     /// All scope events
     pub scope_events: TiVec<ScopeKey, ThinVec<ScopeEvent>>,
     /// All types exprs
-    pub types: TypesExprs,
+    pub types_exprs: TypesExprs,
 }
 
 /// Holds resolved paths
