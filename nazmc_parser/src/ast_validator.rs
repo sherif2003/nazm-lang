@@ -197,17 +197,18 @@ impl<'a> ASTValidator<'a> {
                 Item::Const(c) => {
                     let body = c.body.unwrap();
                     let name = body.id;
-                    let id = name.data.val;
+                    let id_key = name.data.val;
                     let id_span = name.span;
 
-                    if self.check_if_name_conflicts(id, id_span) {
+                    if self.check_if_name_conflicts(id_key, id_span) {
                         continue;
                     }
 
-                    self.items_names_in_current_file.insert(id, id_span);
+                    self.items_names_in_current_file.insert(id_key, id_span);
 
                     let info = nazmc_ast::ItemInfo {
                         file_key: self.file_key,
+                        id_key,
                         id_span,
                     };
 
@@ -222,22 +223,23 @@ impl<'a> ASTValidator<'a> {
 
                     let item = nazmc_ast::Item::Const { vis, key };
 
-                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
+                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id_key, item);
                 }
                 Item::Static(s) => {
                     let body = s.body.unwrap();
                     let name = body.id;
-                    let id = name.data.val;
+                    let id_key = name.data.val;
                     let id_span = name.span;
 
-                    if self.check_if_name_conflicts(id, id_span) {
+                    if self.check_if_name_conflicts(id_key, id_span) {
                         continue;
                     }
 
-                    self.items_names_in_current_file.insert(id, id_span);
+                    self.items_names_in_current_file.insert(id_key, id_span);
 
                     let info = nazmc_ast::ItemInfo {
                         file_key: self.file_key,
+                        id_key,
                         id_span,
                     };
 
@@ -252,21 +254,22 @@ impl<'a> ASTValidator<'a> {
 
                     let item = nazmc_ast::Item::Static { vis, key };
 
-                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
+                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id_key, item);
                 }
                 Item::Struct(s) => {
                     let name = s.name.unwrap();
-                    let id = name.data.val;
+                    let id_key = name.data.val;
                     let id_span = name.span;
 
-                    if self.check_if_name_conflicts(id, id_span) {
+                    if self.check_if_name_conflicts(id_key, id_span) {
                         continue;
                     }
 
-                    self.items_names_in_current_file.insert(id, id_span);
+                    self.items_names_in_current_file.insert(id_key, id_span);
 
                     let info = nazmc_ast::ItemInfo {
                         file_key: self.file_key,
+                        id_key,
                         id_span,
                     };
 
@@ -279,7 +282,7 @@ impl<'a> ASTValidator<'a> {
 
                             let item = nazmc_ast::Item::UnitStruct { vis, key };
 
-                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
+                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id_key, item);
                         }
                         StructKind::Tuple(tuple_struct_fields) => {
                             let mut types = ThinVec::new();
@@ -306,7 +309,7 @@ impl<'a> ASTValidator<'a> {
 
                             let item = nazmc_ast::Item::TupleStruct { vis, key };
 
-                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
+                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id_key, item);
                         }
                         StructKind::Fields(struct_fields) => {
                             let mut fields = HashMap::new();
@@ -341,23 +344,24 @@ impl<'a> ASTValidator<'a> {
 
                             let item = nazmc_ast::Item::FieldsStruct { vis, key };
 
-                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
+                            self.ast.state.pkgs_to_items[self.pkg_key].insert(id_key, item);
                         }
                     }
                 }
                 Item::Fn(f) => {
                     let name = f.name.unwrap();
-                    let id = name.data.val;
+                    let id_key = name.data.val;
                     let id_span = name.span;
 
-                    if self.check_if_name_conflicts(id, id_span) {
+                    if self.check_if_name_conflicts(id_key, id_span) {
                         continue;
                     }
 
-                    self.items_names_in_current_file.insert(id, id_span);
+                    self.items_names_in_current_file.insert(id_key, id_span);
 
                     let info = nazmc_ast::ItemInfo {
                         file_key: self.file_key,
+                        id_key,
                         id_span,
                     };
 
@@ -412,17 +416,16 @@ impl<'a> ASTValidator<'a> {
                     self.ast.scopes[scope_key].extra_params =
                         params.iter().map(|param| param.0.id).collect();
 
-                    self.ast.fns_scopes.push(scope_key);
-
                     let key = self.ast.fns.push_and_get_key(nazmc_ast::Fn {
                         info,
                         params,
                         return_type,
+                        scope_key,
                     });
 
                     let item = nazmc_ast::Item::Fn { vis, key };
 
-                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id, item);
+                    self.ast.state.pkgs_to_items[self.pkg_key].insert(id_key, item);
                 }
             }
         }

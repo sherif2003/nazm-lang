@@ -12,14 +12,11 @@ pub use typ::*;
 mod item;
 mod typ;
 
-new_data_pool_key! { FileKey }
-new_data_pool_key! { PkgKey }
 new_data_pool_key! { UnitStructPathKey }
 new_data_pool_key! { TupleStructPathKey }
 new_data_pool_key! { FieldsStructPathKey }
 new_data_pool_key! { PathNoPkgKey }
 new_data_pool_key! { PathWithPkgKey }
-
 new_data_pool_key! { TypeExprKey }
 new_data_pool_key! { PathTypeExprKey }
 new_data_pool_key! { ParenTypeExprKey }
@@ -32,6 +29,8 @@ new_data_pool_key! { TupleTypeExprKey }
 new_data_pool_key! { ArrayTypeExprKey }
 new_data_pool_key! { LambdaTypeExprKey }
 
+new_data_pool_key! { PkgKey }
+new_data_pool_key! { FileKey }
 new_data_pool_key! { TypeKey }
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
@@ -93,8 +92,6 @@ pub struct AST<S> {
     pub fields_structs: TiVec<FieldsStructKey, FieldsStruct>,
     /// All fns
     pub fns: TiVec<FnKey, Fn>,
-    /// All fns scopse
-    pub fns_scopes: TiVec<FnKey, ScopeKey>,
     /// All scopes
     pub scopes: TiVec<ScopeKey, Scope>,
     /// All let stms
@@ -231,6 +228,7 @@ pub enum VisModifier {
 #[derive(Clone, Copy)]
 pub struct ItemInfo {
     pub file_key: FileKey,
+    pub id_key: IdKey,
     pub id_span: Span,
 }
 
@@ -277,6 +275,7 @@ pub struct Fn {
     pub info: ItemInfo,
     pub params: ThinVec<(ASTId, TypeExprKey)>,
     pub return_type: TypeExprKey,
+    pub scope_key: ScopeKey,
 }
 
 #[derive(Clone, Default)]

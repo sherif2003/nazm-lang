@@ -181,7 +181,8 @@ fn main() {
 
     let mut ast_validator = nazmc_parser::ASTValidator::new(&mut ast);
 
-    let mut files_infos = TiVec::<FileKey, FileInfo>::new();
+    let mut files_infos = TiVec::<FileKey, FileInfo>::with_capacity(files_len);
+    let mut files_to_pkgs = TiVec::<FileKey, PkgKey>::with_capacity(files_len);
     let mut diagnostics: Vec<String> = vec![];
     let mut fail_after_parsing = false;
 
@@ -195,6 +196,8 @@ fn main() {
                 lines,
             };
 
+            files_to_pkgs[file_key] = pkg_key;
+
             match parse(
                 tokens,
                 &file_info,
@@ -206,6 +209,7 @@ fn main() {
             ) {
                 Ok(_) => {
                     files_infos.push(file_info);
+                    files_to_pkgs.push(pkg_key);
                 }
                 Err(d) => {
                     diagnostics.push(d);

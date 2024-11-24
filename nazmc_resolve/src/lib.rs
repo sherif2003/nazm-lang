@@ -244,13 +244,13 @@ impl<'a> NameResolver<'a> {
 
         let mut names_stack = vec![];
 
-        let fns_scopes_len = self.ast.fns_scopes.len();
+        let fns_len = self.ast.fns.len();
 
-        for i in 0..fns_scopes_len {
+        for i in 0..fns_len {
             names_stack.clear();
             let fn_key = FnKey::from(i);
-            let scope_key = self.ast.fns_scopes[fn_key];
             let at = self.ast.fns[fn_key].info.file_key;
+            let scope_key = self.ast.fns[fn_key].scope_key;
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
@@ -284,7 +284,6 @@ impl<'a> NameResolver<'a> {
             tuple_structs: self.ast.tuple_structs,
             fields_structs: self.ast.fields_structs,
             fns: self.ast.fns,
-            fns_scopes: self.ast.fns_scopes,
             scopes: self.ast.scopes,
             lets: self.ast.lets,
         }
