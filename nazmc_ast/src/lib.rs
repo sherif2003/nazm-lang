@@ -236,14 +236,14 @@ pub struct ItemInfo {
 pub struct Const {
     pub info: ItemInfo,
     pub typ: TypeExprKey,
-    pub expr: Expr,
+    pub scope_key: ScopeKey,
 }
 
 #[derive(Clone)]
 pub struct Static {
     pub info: ItemInfo,
     pub typ: TypeExprKey,
-    pub expr: Expr,
+    pub scope_key: ScopeKey,
 }
 
 #[derive(Clone)]

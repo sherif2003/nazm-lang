@@ -1,9 +1,9 @@
 use nazmc_ast::{
-    ASTId, ArrayType, ArrayTypeKey, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey, Item,
-    ItemInfo, ItemPath, LambdaType, LambdaTypeKey, LiteralExpr, PathNoPkgKey, PathTypeExprKey,
-    PathWithPkgKey, PkgKey, PkgPath, ScopeKey, StarImportStm, TupleStructKey, TupleStructPathKey,
-    TupleType, TupleTypeKey, Type, TypeExpr, TypeExprKey, TypeKey, Types, UnitStructKey,
-    UnitStructPathKey, VisModifier,
+    ASTId, ArrayType, ArrayTypeKey, ConstKey, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey,
+    Item, ItemInfo, ItemPath, LambdaType, LambdaTypeKey, LiteralExpr, PathNoPkgKey,
+    PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey, StarImportStm, StaticKey,
+    TupleStructKey, TupleStructPathKey, TupleType, TupleTypeKey, Type, TypeExpr, TypeExprKey,
+    TypeKey, Types, UnitStructKey, UnitStructPathKey, VisModifier,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -282,6 +282,42 @@ impl<'a> NameResolver<'a> {
             );
         }
 
+        let consts_len = self.ast.consts.len();
+
+        for i in 0..consts_len {
+            names_stack.clear();
+            let const_key = ConstKey::from(i);
+            let at = self.ast.consts[const_key].info.file_key;
+            let scope_key = self.ast.consts[const_key].scope_key;
+            self.resolve_paths_in_scope(
+                at,
+                &mut names_stack,
+                scope_key,
+                &paths.paths_no_pkgs_exprs,
+                &mut resolved_paths_no_pkgs_exprs,
+                &resolved_imports,
+                &resolved_star_imports,
+            );
+        }
+
+        let statics_len = self.ast.statics.len();
+
+        for i in 0..statics_len {
+            names_stack.clear();
+            let static_key = StaticKey::from(i);
+            let at = self.ast.statics[static_key].info.file_key;
+            let scope_key = self.ast.statics[static_key].scope_key;
+            self.resolve_paths_in_scope(
+                at,
+                &mut names_stack,
+                scope_key,
+                &paths.paths_no_pkgs_exprs,
+                &mut resolved_paths_no_pkgs_exprs,
+                &resolved_imports,
+                &resolved_star_imports,
+            );
+        }
+
         if !self.diagnostics.is_empty() {
             eprint_diagnostics(self.diagnostics);
             exit(1);
@@ -379,48 +415,49 @@ impl<'a> NameResolver<'a> {
                 Type::Tuple(key)
             }
             TypeExpr::Array(array_type_expr_key) => {
+                todo!()
                 // TODO: Support const expressions
-                let array_expr = &self.ast.state.types_exprs.arrays[array_type_expr_key];
+                // let array_expr = &self.ast.state.types_exprs.arrays[array_type_expr_key];
 
-                let size = if let nazmc_ast::ExprKind::Literal(LiteralExpr::Num(
-                    num @ nazmc_ast::NumKind::U(_) | num @ nazmc_ast::NumKind::UnspecifiedInt(_),
-                )) = &array_expr.size_expr.kind
-                {
-                    match num {
-                        nazmc_ast::NumKind::U(size) => *size as u32,
-                        nazmc_ast::NumKind::UnspecifiedInt(size) => *size as u32,
-                        _ => unreachable!(),
-                    }
-                } else {
-                    let mut code_window = CodeWindow::new(
-                        &self.files_infos[array_expr.file_key],
-                        array_expr.span.start,
-                    );
-                    code_window.mark_error(
-                        array_expr.span,
-                        vec!["يجب أن يكون ثابت من النوع ص".to_string()],
-                    );
-                    let mut diagnostic = Diagnostic::error(
-                        "تعبير حجم المصفوفة يجب أن يكون ثابت من النوع ص".to_string(),
-                        vec![code_window],
-                    );
-                    let note = Diagnostic::note(
-                        "سيتم دعم التعبيرات الثابتة في المستقبل إن شاء الله".to_string(),
-                        vec![],
-                    );
-                    diagnostic.chain(note);
-                    self.diagnostics.push(diagnostic);
-                    0
-                };
+                // let size = if let nazmc_ast::ExprKind::Literal(LiteralExpr::Num(
+                //     num @ nazmc_ast::NumKind::U(_) | num @ nazmc_ast::NumKind::UnspecifiedInt(_),
+                // )) = &array_expr.size_expr.kind
+                // {
+                //     match num {
+                //         nazmc_ast::NumKind::U(size) => *size as u32,
+                //         nazmc_ast::NumKind::UnspecifiedInt(size) => *size as u32,
+                //         _ => unreachable!(),
+                //     }
+                // } else {
+                //     let mut code_window = CodeWindow::new(
+                //         &self.files_infos[array_expr.file_key],
+                //         array_expr.span.start,
+                //     );
+                //     code_window.mark_error(
+                //         array_expr.span,
+                //         vec!["يجب أن يكون ثابت من النوع ص".to_string()],
+                //     );
+                //     let mut diagnostic = Diagnostic::error(
+                //         "تعبير حجم المصفوفة يجب أن يكون ثابت من النوع ص".to_string(),
+                //         vec![code_window],
+                //     );
+                //     let note = Diagnostic::note(
+                //         "سيتم دعم التعبيرات الثابتة في المستقبل إن شاء الله".to_string(),
+                //         vec![],
+                //     );
+                //     diagnostic.chain(note);
+                //     self.diagnostics.push(diagnostic);
+                //     0
+                // };
 
-                let underlying_typ = self.get_unique_type(array_expr.underlying_typ);
+                // let underlying_typ = self.get_unique_type(array_expr.underlying_typ);
 
-                let key = self.array_types_pool.get_key(&ArrayType {
-                    underlying_typ,
-                    size,
-                });
+                // let key = self.array_types_pool.get_key(&ArrayType {
+                //     underlying_typ,
+                //     size,
+                // });
 
-                Type::Array(key)
+                // Type::Array(key)
             }
             TypeExpr::Lambda(lambda_type_expr_key) => {
                 let params_types = std::mem::take(

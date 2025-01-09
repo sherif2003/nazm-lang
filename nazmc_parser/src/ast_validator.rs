@@ -50,7 +50,7 @@ pub struct ASTValidator<'a> {
     pub(crate) fn_params_conflicts_in_files: FnParamsConflictsInFiles,
     pub(crate) bindings_conflicts: BindingsConflicts,
     pub(crate) items_and_imports_conflicts_in_files: ItemsAndImportsConflictsInFiles,
-    pub(crate) current_scope_key: Option<ScopeKey>,
+    pub(crate) current_scope_key: ScopeKey,
 }
 
 impl<'a> ASTValidator<'a> {
@@ -66,7 +66,7 @@ impl<'a> ASTValidator<'a> {
             fn_params_conflicts_in_files: Default::default(),
             bindings_conflicts: Default::default(),
             items_and_imports_conflicts_in_files: Default::default(),
-            current_scope_key: None,
+            current_scope_key: Default::default(),
         }
     }
 
@@ -214,12 +214,13 @@ impl<'a> ASTValidator<'a> {
 
                     let typ = self.lower_type(body.typ.unwrap());
 
-                    let expr = self.lower_expr(body.expr.unwrap());
+                    let scope_key = self.lower_staic_or_const_expr_to_scope(body.expr.unwrap());
 
-                    let key =
-                        self.ast
-                            .consts
-                            .push_and_get_key(nazmc_ast::Const { info, typ, expr });
+                    let key = self.ast.consts.push_and_get_key(nazmc_ast::Const {
+                        info,
+                        typ,
+                        scope_key,
+                    });
 
                     let item = nazmc_ast::Item::Const { vis, key };
 
@@ -245,12 +246,13 @@ impl<'a> ASTValidator<'a> {
 
                     let typ = self.lower_type(body.typ.unwrap());
 
-                    let expr = self.lower_expr(body.expr.unwrap());
+                    let scope_key = self.lower_staic_or_const_expr_to_scope(body.expr.unwrap());
 
-                    let key =
-                        self.ast
-                            .statics
-                            .push_and_get_key(nazmc_ast::Static { info, typ, expr });
+                    let key = self.ast.statics.push_and_get_key(nazmc_ast::Static {
+                        info,
+                        typ,
+                        scope_key,
+                    });
 
                     let item = nazmc_ast::Item::Static { vis, key };
 
@@ -600,12 +602,13 @@ impl<'a> ASTValidator<'a> {
                         .merged_with(&slice_type.close_bracket.unwrap().span);
 
                     if let Some(array_size) = slice_type.array_size {
-                        let size_expr = self.lower_expr(array_size.expr.unwrap());
+                        let scope_key =
+                            self.lower_staic_or_const_expr_to_scope(array_size.expr.unwrap());
 
                         let key = self.ast.state.types_exprs.arrays.push_and_get_key(
                             nazmc_ast::ArrayTypeExpr {
                                 underlying_typ,
-                                size_expr,
+                                scope_key,
                                 file_key: self.file_key,
                                 span,
                             },
@@ -761,6 +764,20 @@ impl<'a> ASTValidator<'a> {
         }
     }
 
+    /// This has the same implementation of `lower_lambda_stms_and_return_expr` but with no stms
+    fn lower_staic_or_const_expr_to_scope(&mut self, expr: Expr) -> nazmc_ast::ScopeKey {
+        let scope = nazmc_ast::Scope::default();
+        let last_scope_key = self.current_scope_key;
+        self.current_scope_key = self.ast.scopes.push_and_get_key(scope);
+        self.ast.state.scope_events.push(ThinVec::new());
+
+        self.ast.scopes[self.current_scope_key].return_expr = Some(self.lower_expr(expr));
+
+        let scope_key = self.current_scope_key;
+        self.current_scope_key = last_scope_key;
+        scope_key
+    }
+
     #[inline]
     fn lower_lambda_as_body(&mut self, lambda: LambdaExpr) -> nazmc_ast::ScopeKey {
         self.lower_lambda_stms_and_return_expr(lambda.stms, lambda.last_expr)
@@ -773,8 +790,7 @@ impl<'a> ASTValidator<'a> {
     ) -> nazmc_ast::ScopeKey {
         let scope = nazmc_ast::Scope::default();
         let last_scope_key = self.current_scope_key;
-        let scope_key = self.ast.scopes.push_and_get_key(scope);
-        self.current_scope_key = Some(scope_key);
+        self.current_scope_key = self.ast.scopes.push_and_get_key(scope);
         self.ast.state.scope_events.push(ThinVec::new());
 
         for stm in stms {
@@ -797,7 +813,7 @@ impl<'a> ASTValidator<'a> {
 
                     let let_stm_key = self.ast.lets.push_and_get_key(let_stm);
 
-                    self.ast.state.scope_events[scope_key]
+                    self.ast.state.scope_events[self.current_scope_key]
                         .push(nazmc_ast::ScopeEvent::Let(let_stm_key));
 
                     nazmc_ast::Stm::Let(let_stm_key)
@@ -810,15 +826,15 @@ impl<'a> ASTValidator<'a> {
                 Stm::When(_when_expr) => todo!(),
                 Stm::Expr(stm) => nazmc_ast::Stm::Expr(Box::new(self.lower_expr(stm.expr))),
             };
-            self.ast.scopes[scope_key].stms.push(stm);
+            self.ast.scopes[self.current_scope_key].stms.push(stm);
         }
 
         let return_expr = return_expr.map(|expr| self.lower_expr(expr));
 
-        self.ast.scopes[scope_key].return_expr = return_expr;
+        self.ast.scopes[self.current_scope_key].return_expr = return_expr;
 
+        let scope_key = self.current_scope_key;
         self.current_scope_key = last_scope_key;
-
         scope_key
     }
 
@@ -1191,10 +1207,8 @@ impl<'a> ASTValidator<'a> {
                         .paths_no_pkgs_exprs
                         .push_and_get_key((item_path.item, item_path.pkg_path.pkg_key));
 
-                    if let Some(scope_key) = self.current_scope_key {
-                        self.ast.state.scope_events[scope_key]
-                            .push(nazmc_ast::ScopeEvent::Path(path_key));
-                    }
+                    self.ast.state.scope_events[self.current_scope_key]
+                        .push(nazmc_ast::ScopeEvent::Path(path_key));
 
                     nazmc_ast::ExprKind::PathNoPkg(path_key)
                 } else {
@@ -1484,9 +1498,8 @@ impl<'a> ASTValidator<'a> {
                 .paths_no_pkgs_exprs
                 .push_and_get_key((item, self.pkg_key));
 
-            if let Some(scope_key) = self.current_scope_key {
-                self.ast.state.scope_events[scope_key].push(nazmc_ast::ScopeEvent::Path(path_key));
-            }
+            self.ast.state.scope_events[self.current_scope_key]
+                .push(nazmc_ast::ScopeEvent::Path(path_key));
 
             nazmc_ast::Expr {
                 span: name.span,
@@ -1543,10 +1556,8 @@ impl<'a> ASTValidator<'a> {
             nazmc_ast::expand_names_binding(&param_binding.kind, &mut bound_names);
         }
 
-        if let Some(scope_key) = self.current_scope_key {
-            self.ast.scopes[scope_key].extra_params =
-                bound_names.iter().map(|ast_id| ast_id.id).collect();
-        }
+        self.ast.scopes[self.current_scope_key].extra_params =
+            bound_names.iter().map(|ast_id| ast_id.id).collect();
 
         self.check_bound_names(bound_names);
 
@@ -1560,9 +1571,8 @@ impl<'a> ASTValidator<'a> {
         let if_condition = self.lower_expr(if_expr.conditional_block.condition.unwrap());
         let if_body = self.lower_lambda_as_body(if_expr.conditional_block.block.unwrap());
 
-        if let Some(scope_key) = self.current_scope_key {
-            self.ast.state.scope_events[scope_key].push(nazmc_ast::ScopeEvent::Scope(if_body));
-        }
+        self.ast.state.scope_events[self.current_scope_key]
+            .push(nazmc_ast::ScopeEvent::Scope(if_body));
 
         let if_ = (if_condition, if_body);
 
@@ -1572,19 +1582,16 @@ impl<'a> ASTValidator<'a> {
             let condition = self.lower_expr(else_if.conditional_block.condition.unwrap());
             let body = self.lower_lambda_as_body(else_if.conditional_block.block.unwrap());
 
-            if let Some(scope_key) = self.current_scope_key {
-                self.ast.state.scope_events[scope_key].push(nazmc_ast::ScopeEvent::Scope(body));
-            }
+            self.ast.state.scope_events[self.current_scope_key]
+                .push(nazmc_ast::ScopeEvent::Scope(body));
 
             else_ifs.push((condition, body));
         }
 
         let else_ = if_expr.else_cluase.map(|e| {
             let body = self.lower_lambda_as_body(e.block.unwrap());
-
-            if let Some(scope_key) = self.current_scope_key {
-                self.ast.state.scope_events[scope_key].push(nazmc_ast::ScopeEvent::Scope(body));
-            }
+            self.ast.state.scope_events[self.current_scope_key]
+                .push(nazmc_ast::ScopeEvent::Scope(body));
             body
         });
 
