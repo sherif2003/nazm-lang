@@ -214,12 +214,13 @@ impl<'a> ASTValidator<'a> {
 
                     let typ = self.lower_type(body.typ.unwrap());
 
-                    let scope_key = self.lower_staic_or_const_expr_to_scope(body.expr.unwrap());
+                    let expr_scope_key =
+                        self.lower_staic_or_const_expr_to_scope(body.expr.unwrap());
 
                     let key = self.ast.consts.push_and_get_key(nazmc_ast::Const {
                         info,
                         typ,
-                        scope_key,
+                        expr_scope_key,
                     });
 
                     let item = nazmc_ast::Item::Const { vis, key };
@@ -246,12 +247,13 @@ impl<'a> ASTValidator<'a> {
 
                     let typ = self.lower_type(body.typ.unwrap());
 
-                    let scope_key = self.lower_staic_or_const_expr_to_scope(body.expr.unwrap());
+                    let expr_scope_key =
+                        self.lower_staic_or_const_expr_to_scope(body.expr.unwrap());
 
                     let key = self.ast.statics.push_and_get_key(nazmc_ast::Static {
                         info,
                         typ,
-                        scope_key,
+                        expr_scope_key,
                     });
 
                     let item = nazmc_ast::Item::Static { vis, key };
@@ -602,13 +604,13 @@ impl<'a> ASTValidator<'a> {
                         .merged_with(&slice_type.close_bracket.unwrap().span);
 
                     if let Some(array_size) = slice_type.array_size {
-                        let scope_key =
+                        let size_expr_scope_key =
                             self.lower_staic_or_const_expr_to_scope(array_size.expr.unwrap());
 
                         let key = self.ast.state.types_exprs.arrays.push_and_get_key(
                             nazmc_ast::ArrayTypeExpr {
                                 underlying_typ,
-                                scope_key,
+                                size_expr_scope_key,
                                 file_key: self.file_key,
                                 span,
                             },

@@ -81,7 +81,7 @@ pub struct TupleTypeExpr {
 #[derive(Clone)]
 pub struct ArrayTypeExpr {
     pub underlying_typ: TypeExprKey,
-    pub scope_key: ScopeKey,
+    pub size_expr_scope_key: ScopeKey,
     pub file_key: FileKey,
     pub span: Span,
 }
