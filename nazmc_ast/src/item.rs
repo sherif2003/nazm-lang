@@ -2,7 +2,7 @@ use crate::{
     ConstKey, FieldsStructKey, FnKey, StaticKey, TupleStructKey, UnitStructKey, VisModifier,
 };
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub enum Item {
     #[default]
     Pkg,

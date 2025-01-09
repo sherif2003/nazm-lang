@@ -217,7 +217,7 @@ pub fn expand_names_binding_owned(kind: &BindingKind, bound_names: &mut Vec<IdKe
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub enum VisModifier {
     #[default]
     Default,

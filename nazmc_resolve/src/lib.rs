@@ -146,7 +146,7 @@ impl<'a> NameResolver<'a> {
                     Item::UnitStruct { vis: _, key } => nazmc_ast::Type::UnitStruct(key),
                     Item::TupleStruct { vis: _, key } => nazmc_ast::Type::TupleStruct(key),
                     Item::FieldsStruct { vis: _, key } => nazmc_ast::Type::FieldsStruct(key),
-                    _ => unreachable!(),
+                    _ => nazmc_ast::Type::UnitStruct(UnitStructKey::default()),
                 }
             })
             .collect::<TiVec<PathTypeExprKey, Type>>();
@@ -288,7 +288,7 @@ impl<'a> NameResolver<'a> {
         }
 
         for type_expr_key in self.ast.state.types_exprs.all.keys() {
-            self.get_uniquie_type(type_expr_key);
+            self.get_unique_type(type_expr_key);
         }
 
         if !self.diagnostics.is_empty() {
@@ -325,7 +325,7 @@ impl<'a> NameResolver<'a> {
         }
     }
 
-    fn get_uniquie_type(&mut self, type_expr_key: TypeExprKey) -> TypeKey {
+    fn get_unique_type(&mut self, type_expr_key: TypeExprKey) -> TypeKey {
         let type_expr = self.ast.state.types_exprs.all[type_expr_key];
 
         let typ = match type_expr {
@@ -333,37 +333,37 @@ impl<'a> NameResolver<'a> {
             TypeExpr::Paren(paren_type_expr_key) => {
                 let type_expr_key =
                     self.ast.state.types_exprs.parens[paren_type_expr_key].underlying_typ;
-                let type_key = self.get_uniquie_type(type_expr_key);
+                let type_key = self.get_unique_type(type_expr_key);
                 return type_key;
             }
             TypeExpr::Slice(slice_type_expr_key) => {
                 let type_expr_key =
                     self.ast.state.types_exprs.slices[slice_type_expr_key].underlying_typ;
-                let type_key = self.get_uniquie_type(type_expr_key);
+                let type_key = self.get_unique_type(type_expr_key);
                 Type::Slice(type_key)
             }
             TypeExpr::Ptr(ptr_type_expr_key) => {
                 let type_expr_key =
                     self.ast.state.types_exprs.ptrs[ptr_type_expr_key].underlying_typ;
-                let type_key = self.get_uniquie_type(type_expr_key);
+                let type_key = self.get_unique_type(type_expr_key);
                 Type::Ptr(type_key)
             }
             TypeExpr::Ref(ref_type_expr_key) => {
                 let type_expr_key =
                     self.ast.state.types_exprs.refs[ref_type_expr_key].underlying_typ;
-                let type_key = self.get_uniquie_type(type_expr_key);
+                let type_key = self.get_unique_type(type_expr_key);
                 Type::Ref(type_key)
             }
             TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
                 let type_expr_key =
                     self.ast.state.types_exprs.ptrs_mut[ptr_mut_type_expr_key].underlying_typ;
-                let type_key = self.get_uniquie_type(type_expr_key);
+                let type_key = self.get_unique_type(type_expr_key);
                 Type::PtrMut(type_key)
             }
             TypeExpr::RefMut(ref_mut_type_expr_key) => {
                 let type_expr_key =
                     self.ast.state.types_exprs.refs_mut[ref_mut_type_expr_key].underlying_typ;
-                let type_key = self.get_uniquie_type(type_expr_key);
+                let type_key = self.get_unique_type(type_expr_key);
                 Type::RefMut(type_key)
             }
             TypeExpr::Tuple(tuple_type_expr_key) => {
@@ -371,7 +371,7 @@ impl<'a> NameResolver<'a> {
                     &mut self.ast.state.types_exprs.tuples[tuple_type_expr_key].types,
                 )
                 .into_iter()
-                .map(|type_expr_key| self.get_uniquie_type(type_expr_key))
+                .map(|type_expr_key| self.get_unique_type(type_expr_key))
                 .collect();
 
                 let key = self.tuple_types_pool.get_key(&TupleType { types });
@@ -413,7 +413,7 @@ impl<'a> NameResolver<'a> {
                     0
                 };
 
-                let underlying_typ = self.get_uniquie_type(array_expr.underlying_typ);
+                let underlying_typ = self.get_unique_type(array_expr.underlying_typ);
 
                 let key = self.array_types_pool.get_key(&ArrayType {
                     underlying_typ,
@@ -427,10 +427,10 @@ impl<'a> NameResolver<'a> {
                     &mut self.ast.state.types_exprs.lambdas[lambda_type_expr_key].params_types,
                 )
                 .into_iter()
-                .map(|type_expr_key| self.get_uniquie_type(type_expr_key))
+                .map(|type_expr_key| self.get_unique_type(type_expr_key))
                 .collect();
 
-                let return_type = self.get_uniquie_type(
+                let return_type = self.get_unique_type(
                     self.ast.state.types_exprs.lambdas[lambda_type_expr_key].return_type,
                 );
 

@@ -196,8 +196,6 @@ fn main() {
                 lines,
             };
 
-            files_to_pkgs[file_key] = pkg_key;
-
             match parse(
                 tokens,
                 &file_info,
