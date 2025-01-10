@@ -56,14 +56,10 @@ pub struct Unresolved {
     pub paths: ASTPaths,
     /// All scope events
     pub scope_events: TiVec<ScopeKey, ThinVec<ScopeEvent>>,
-    /// All types exprs
-    pub types_exprs: TypesExprs,
 }
 
 /// Holds resolved paths
 pub struct Resolved {
-    /// All types
-    pub types: Types,
     /// The list of all unit struct expressions paths
     pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, UnitStructKey>,
     /// The list of all tuple struct expressions paths
@@ -74,12 +70,16 @@ pub struct Resolved {
     pub paths_no_pkgs_exprs: TiVec<PathNoPkgKey, Item>,
     /// The list of all paths expressions that have leading pkgs paths
     pub paths_with_pkgs_exprs: TiVec<PathWithPkgKey, Item>,
+    /// The list of resolved types paths expressions which point only to resolved structs
+    pub types_paths: TiVec<PathTypeExprKey, Type>,
 }
 
 #[derive(Default)]
 pub struct AST<S> {
     /// The state of AST: may be `Unresolved` or `Resolved`
     pub state: S,
+    /// All types exprs
+    pub types_exprs: TypesExprs,
     /// All consts
     pub consts: TiVec<ConstKey, Const>,
     /// All statics

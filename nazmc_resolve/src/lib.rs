@@ -1,13 +1,12 @@
 use nazmc_ast::{
-    ASTId, ArrayType, ArrayTypeExprKey, ArrayTypeKey, ConstKey, FieldsStructKey,
-    FieldsStructPathKey, FileKey, FnKey, Item, ItemInfo, ItemPath, LambdaType, LambdaTypeKey,
-    LiteralExpr, PathNoPkgKey, PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey,
-    StarImportStm, StaticKey, TupleStructKey, TupleStructPathKey, TupleType, TupleTypeKey, Type,
-    TypeExpr, TypeExprKey, TypeKey, Types, UnitStructKey, UnitStructPathKey, VisModifier,
+    ASTId, ArrayTypeExprKey, ConstKey, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey, Item,
+    ItemInfo, ItemPath, PathNoPkgKey, PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey,
+    StarImportStm, StaticKey, TupleStructKey, TupleStructPathKey, Type, UnitStructKey,
+    UnitStructPathKey, VisModifier,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
-    DataPoolBuilder, IdKey,
+    IdKey,
 };
 use nazmc_diagnostics::{
     eprint_diagnostics, file_info::FileInfo, span::Span, CodeWindow, Diagnostic,
@@ -21,11 +20,6 @@ pub struct NameResolver<'a> {
     pkgs: &'a HashMap<ThinVec<IdKey>, usize>,
     pkgs_names: &'a TiSlice<PkgKey, &'a ThinVec<IdKey>>,
     ast: nazmc_ast::AST<nazmc_ast::Unresolved>,
-    all_types_pool: DataPoolBuilder<TypeKey, Type>,
-    tuple_types_pool: DataPoolBuilder<TupleTypeKey, TupleType>,
-    array_types_pool: DataPoolBuilder<ArrayTypeKey, ArrayType>,
-    lambda_types_pool: DataPoolBuilder<LambdaTypeKey, LambdaType>,
-    resolved_types_paths: TiVec<PathTypeExprKey, Type>,
     diagnostics: Vec<Diagnostic<'a>>,
 }
 
@@ -47,11 +41,6 @@ impl<'a> NameResolver<'a> {
         ast: nazmc_ast::AST<nazmc_ast::Unresolved>,
     ) -> Self {
         Self {
-            all_types_pool: DataPoolBuilder::new(),
-            tuple_types_pool: DataPoolBuilder::new(),
-            array_types_pool: DataPoolBuilder::new(),
-            lambda_types_pool: DataPoolBuilder::new(),
-            resolved_types_paths: TiVec::with_capacity(ast.state.types_exprs.paths.len()),
             files_infos,
             id_pool,
             pkgs,
@@ -119,7 +108,7 @@ impl<'a> NameResolver<'a> {
             })
             .collect::<TiVec<FileKey, ThinVec<_>>>();
 
-        self.resolved_types_paths = std::mem::take(&mut self.ast.state.types_exprs.paths)
+        let resolved_types_paths = std::mem::take(&mut self.ast.types_exprs.paths)
             .into_iter()
             .map(|item_path| {
                 let file_key = item_path.pkg_path.file_key;
@@ -318,14 +307,13 @@ impl<'a> NameResolver<'a> {
             );
         }
 
-        let array_types_exprs_len = self.ast.state.types_exprs.arrays.len();
+        let array_types_exprs_len = self.ast.types_exprs.arrays.len();
 
         for i in 0..array_types_exprs_len {
             names_stack.clear();
             let array_type_expr_key = ArrayTypeExprKey::from(i);
-            let at = self.ast.state.types_exprs.arrays[array_type_expr_key].file_key;
-            let scope_key =
-                self.ast.state.types_exprs.arrays[array_type_expr_key].size_expr_scope_key;
+            let at = self.ast.types_exprs.arrays[array_type_expr_key].file_key;
+            let scope_key = self.ast.types_exprs.arrays[array_type_expr_key].size_expr_scope_key;
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
@@ -342,33 +330,18 @@ impl<'a> NameResolver<'a> {
             exit(1);
         }
 
-        for type_expr_key in self.ast.state.types_exprs.all.keys() {
-            self.get_unique_type(type_expr_key);
-        }
-
-        if !self.diagnostics.is_empty() {
-            eprint_diagnostics(self.diagnostics);
-            exit(1);
-        }
-
-        let types = Types {
-            all: self.all_types_pool.build(),
-            tuples: self.tuple_types_pool.build(),
-            arrays: self.array_types_pool.build(),
-            lambdas: self.lambda_types_pool.build(),
-        };
-
         let state = nazmc_ast::Resolved {
-            types,
             unit_structs_paths_exprs: resolved_unit_structs_exprs,
             tuple_structs_paths_exprs: resolved_tuple_structs_exprs,
             field_structs_paths_exprs: resolved_field_structs_exprs,
             paths_no_pkgs_exprs: resolved_paths_no_pkgs_exprs,
             paths_with_pkgs_exprs: resolved_paths_with_pkgs_exprs,
+            types_paths: resolved_types_paths,
         };
 
         nazmc_ast::AST {
             state,
+            types_exprs: self.ast.types_exprs,
             consts: self.ast.consts,
             statics: self.ast.statics,
             unit_structs: self.ast.unit_structs,
@@ -378,128 +351,6 @@ impl<'a> NameResolver<'a> {
             scopes: self.ast.scopes,
             lets: self.ast.lets,
         }
-    }
-
-    fn get_unique_type(&mut self, type_expr_key: TypeExprKey) -> TypeKey {
-        let type_expr = self.ast.state.types_exprs.all[type_expr_key];
-
-        let typ = match type_expr {
-            TypeExpr::Path(path_type_expr_key) => self.resolved_types_paths[path_type_expr_key],
-            TypeExpr::Paren(paren_type_expr_key) => {
-                let type_expr_key =
-                    self.ast.state.types_exprs.parens[paren_type_expr_key].underlying_typ;
-                let type_key = self.get_unique_type(type_expr_key);
-                return type_key;
-            }
-            TypeExpr::Slice(slice_type_expr_key) => {
-                let type_expr_key =
-                    self.ast.state.types_exprs.slices[slice_type_expr_key].underlying_typ;
-                let type_key = self.get_unique_type(type_expr_key);
-                Type::Slice(type_key)
-            }
-            TypeExpr::Ptr(ptr_type_expr_key) => {
-                let type_expr_key =
-                    self.ast.state.types_exprs.ptrs[ptr_type_expr_key].underlying_typ;
-                let type_key = self.get_unique_type(type_expr_key);
-                Type::Ptr(type_key)
-            }
-            TypeExpr::Ref(ref_type_expr_key) => {
-                let type_expr_key =
-                    self.ast.state.types_exprs.refs[ref_type_expr_key].underlying_typ;
-                let type_key = self.get_unique_type(type_expr_key);
-                Type::Ref(type_key)
-            }
-            TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
-                let type_expr_key =
-                    self.ast.state.types_exprs.ptrs_mut[ptr_mut_type_expr_key].underlying_typ;
-                let type_key = self.get_unique_type(type_expr_key);
-                Type::PtrMut(type_key)
-            }
-            TypeExpr::RefMut(ref_mut_type_expr_key) => {
-                let type_expr_key =
-                    self.ast.state.types_exprs.refs_mut[ref_mut_type_expr_key].underlying_typ;
-                let type_key = self.get_unique_type(type_expr_key);
-                Type::RefMut(type_key)
-            }
-            TypeExpr::Tuple(tuple_type_expr_key) => {
-                let types = std::mem::take(
-                    &mut self.ast.state.types_exprs.tuples[tuple_type_expr_key].types,
-                )
-                .into_iter()
-                .map(|type_expr_key| self.get_unique_type(type_expr_key))
-                .collect();
-
-                let key = self.tuple_types_pool.get_key(&TupleType { types });
-
-                Type::Tuple(key)
-            }
-            TypeExpr::Array(array_type_expr_key) => {
-                todo!()
-                // TODO: Support const expressions
-                // let array_expr = &self.ast.state.types_exprs.arrays[array_type_expr_key];
-
-                // let size = if let nazmc_ast::ExprKind::Literal(LiteralExpr::Num(
-                //     num @ nazmc_ast::NumKind::U(_) | num @ nazmc_ast::NumKind::UnspecifiedInt(_),
-                // )) = &array_expr.size_expr.kind
-                // {
-                //     match num {
-                //         nazmc_ast::NumKind::U(size) => *size as u32,
-                //         nazmc_ast::NumKind::UnspecifiedInt(size) => *size as u32,
-                //         _ => unreachable!(),
-                //     }
-                // } else {
-                //     let mut code_window = CodeWindow::new(
-                //         &self.files_infos[array_expr.file_key],
-                //         array_expr.span.start,
-                //     );
-                //     code_window.mark_error(
-                //         array_expr.span,
-                //         vec!["يجب أن يكون ثابت من النوع ص".to_string()],
-                //     );
-                //     let mut diagnostic = Diagnostic::error(
-                //         "تعبير حجم المصفوفة يجب أن يكون ثابت من النوع ص".to_string(),
-                //         vec![code_window],
-                //     );
-                //     let note = Diagnostic::note(
-                //         "سيتم دعم التعبيرات الثابتة في المستقبل إن شاء الله".to_string(),
-                //         vec![],
-                //     );
-                //     diagnostic.chain(note);
-                //     self.diagnostics.push(diagnostic);
-                //     0
-                // };
-
-                // let underlying_typ = self.get_unique_type(array_expr.underlying_typ);
-
-                // let key = self.array_types_pool.get_key(&ArrayType {
-                //     underlying_typ,
-                //     size,
-                // });
-
-                // Type::Array(key)
-            }
-            TypeExpr::Lambda(lambda_type_expr_key) => {
-                let params_types = std::mem::take(
-                    &mut self.ast.state.types_exprs.lambdas[lambda_type_expr_key].params_types,
-                )
-                .into_iter()
-                .map(|type_expr_key| self.get_unique_type(type_expr_key))
-                .collect();
-
-                let return_type = self.get_unique_type(
-                    self.ast.state.types_exprs.lambdas[lambda_type_expr_key].return_type,
-                );
-
-                let key = self.lambda_types_pool.get_key(&LambdaType {
-                    params_types,
-                    return_type,
-                });
-
-                Type::Lambda(key)
-            }
-        };
-
-        self.all_types_pool.get_key(&typ)
     }
 
     fn resolve_paths_in_scope(

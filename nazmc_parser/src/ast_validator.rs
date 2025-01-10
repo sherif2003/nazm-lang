@@ -403,7 +403,7 @@ impl<'a> ASTValidator<'a> {
                     let return_type = if let Some(ColonWithType { colon: _, typ }) = f.return_type {
                         self.lower_type(typ.unwrap())
                     } else {
-                        let key = self.ast.state.types_exprs.tuples.push_and_get_key(
+                        let key = self.ast.types_exprs.tuples.push_and_get_key(
                             nazmc_ast::TupleTypeExpr {
                                 types: ThinVec::new(),
                                 file_key: self.file_key,
@@ -413,7 +413,7 @@ impl<'a> ASTValidator<'a> {
 
                         let typ_expr = nazmc_ast::TypeExpr::Tuple(key);
 
-                        self.ast.state.types_exprs.all.push_and_get_key(typ_expr)
+                        self.ast.types_exprs.all.push_and_get_key(typ_expr)
                     };
 
                     let scope_key = self.lower_lambda_as_body(f.body.unwrap());
@@ -535,8 +535,7 @@ impl<'a> ASTValidator<'a> {
             match typ {
                 Type::Path(simple_path) => {
                     let item_path = self.lower_simple_path(simple_path);
-                    let type_path_key =
-                        self.ast.state.types_exprs.paths.push_and_get_key(item_path);
+                    let type_path_key = self.ast.types_exprs.paths.push_and_get_key(item_path);
                     nazmc_ast::TypeExpr::Path(type_path_key)
                 }
                 Type::Ptr(ptr_type) => {
@@ -547,7 +546,7 @@ impl<'a> ASTValidator<'a> {
                     if let Some(mut_) = ptr_type.mut_keyword {
                         let span = span.merged_with(&mut_.span);
 
-                        let key = self.ast.state.types_exprs.ptrs_mut.push_and_get_key(
+                        let key = self.ast.types_exprs.ptrs_mut.push_and_get_key(
                             nazmc_ast::PtrMutTypeExpr {
                                 underlying_typ,
                                 file_key: self.file_key,
@@ -557,13 +556,15 @@ impl<'a> ASTValidator<'a> {
 
                         nazmc_ast::TypeExpr::PtrMut(key)
                     } else {
-                        let key = self.ast.state.types_exprs.ptrs.push_and_get_key(
-                            nazmc_ast::PtrTypeExpr {
-                                underlying_typ,
-                                file_key: self.file_key,
-                                span,
-                            },
-                        );
+                        let key =
+                            self.ast
+                                .types_exprs
+                                .ptrs
+                                .push_and_get_key(nazmc_ast::PtrTypeExpr {
+                                    underlying_typ,
+                                    file_key: self.file_key,
+                                    span,
+                                });
 
                         nazmc_ast::TypeExpr::Ptr(key)
                     }
@@ -574,7 +575,7 @@ impl<'a> ASTValidator<'a> {
                     if let Some(mut_) = ref_type.mut_keyword {
                         let span = span.merged_with(&mut_.span);
 
-                        let key = self.ast.state.types_exprs.refs_mut.push_and_get_key(
+                        let key = self.ast.types_exprs.refs_mut.push_and_get_key(
                             nazmc_ast::RefMutTypeExpr {
                                 underlying_typ,
                                 file_key: self.file_key,
@@ -584,13 +585,15 @@ impl<'a> ASTValidator<'a> {
 
                         nazmc_ast::TypeExpr::RefMut(key)
                     } else {
-                        let key = self.ast.state.types_exprs.refs.push_and_get_key(
-                            nazmc_ast::RefTypeExpr {
-                                underlying_typ,
-                                file_key: self.file_key,
-                                span,
-                            },
-                        );
+                        let key =
+                            self.ast
+                                .types_exprs
+                                .refs
+                                .push_and_get_key(nazmc_ast::RefTypeExpr {
+                                    underlying_typ,
+                                    file_key: self.file_key,
+                                    span,
+                                });
 
                         nazmc_ast::TypeExpr::Ref(key)
                     }
@@ -607,7 +610,7 @@ impl<'a> ASTValidator<'a> {
                         let size_expr_scope_key =
                             self.lower_staic_or_const_expr_to_scope(array_size.expr.unwrap());
 
-                        let key = self.ast.state.types_exprs.arrays.push_and_get_key(
+                        let key = self.ast.types_exprs.arrays.push_and_get_key(
                             nazmc_ast::ArrayTypeExpr {
                                 underlying_typ,
                                 size_expr_scope_key,
@@ -618,7 +621,7 @@ impl<'a> ASTValidator<'a> {
 
                         nazmc_ast::TypeExpr::Array(key)
                     } else {
-                        let key = self.ast.state.types_exprs.slices.push_and_get_key(
+                        let key = self.ast.types_exprs.slices.push_and_get_key(
                             nazmc_ast::SliceTypeExpr {
                                 underlying_typ,
                                 file_key: self.file_key,
@@ -653,40 +656,40 @@ impl<'a> ASTValidator<'a> {
                     if let Some(lambda_type) = paren_type.lambda {
                         let return_type = self.lower_type(lambda_type.typ.unwrap());
 
-                        let span = match self.ast.state.types_exprs.all[return_type] {
+                        let span = match self.ast.types_exprs.all[return_type] {
                             nazmc_ast::TypeExpr::Path(type_path_key) => {
-                                self.ast.state.types_exprs.paths[type_path_key].item.span
+                                self.ast.types_exprs.paths[type_path_key].item.span
                             }
                             nazmc_ast::TypeExpr::Paren(paren_type_expr_key) => {
-                                self.ast.state.types_exprs.parens[paren_type_expr_key].span
+                                self.ast.types_exprs.parens[paren_type_expr_key].span
                             }
                             nazmc_ast::TypeExpr::Slice(slice_type_expr_key) => {
-                                self.ast.state.types_exprs.slices[slice_type_expr_key].span
+                                self.ast.types_exprs.slices[slice_type_expr_key].span
                             }
                             nazmc_ast::TypeExpr::Ptr(ptr_type_expr_key) => {
-                                self.ast.state.types_exprs.ptrs[ptr_type_expr_key].span
+                                self.ast.types_exprs.ptrs[ptr_type_expr_key].span
                             }
                             nazmc_ast::TypeExpr::Ref(ref_type_expr_key) => {
-                                self.ast.state.types_exprs.refs[ref_type_expr_key].span
+                                self.ast.types_exprs.refs[ref_type_expr_key].span
                             }
                             nazmc_ast::TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
-                                self.ast.state.types_exprs.ptrs_mut[ptr_mut_type_expr_key].span
+                                self.ast.types_exprs.ptrs_mut[ptr_mut_type_expr_key].span
                             }
                             nazmc_ast::TypeExpr::RefMut(ref_mut_type_expr_key) => {
-                                self.ast.state.types_exprs.refs_mut[ref_mut_type_expr_key].span
+                                self.ast.types_exprs.refs_mut[ref_mut_type_expr_key].span
                             }
                             nazmc_ast::TypeExpr::Tuple(tuple_type_expr_key) => {
-                                self.ast.state.types_exprs.tuples[tuple_type_expr_key].span
+                                self.ast.types_exprs.tuples[tuple_type_expr_key].span
                             }
                             nazmc_ast::TypeExpr::Array(array_type_expr_key) => {
-                                self.ast.state.types_exprs.arrays[array_type_expr_key].span
+                                self.ast.types_exprs.arrays[array_type_expr_key].span
                             }
                             nazmc_ast::TypeExpr::Lambda(lambda_type_expr_key) => {
-                                self.ast.state.types_exprs.lambdas[lambda_type_expr_key].span
+                                self.ast.types_exprs.lambdas[lambda_type_expr_key].span
                             }
                         };
 
-                        let key = self.ast.state.types_exprs.lambdas.push_and_get_key(
+                        let key = self.ast.types_exprs.lambdas.push_and_get_key(
                             nazmc_ast::LambdaTypeExpr {
                                 params_types: types,
                                 return_type,
@@ -704,7 +707,7 @@ impl<'a> ASTValidator<'a> {
                             .merged_with(&paren_type.tuple.close_delim.unwrap().span);
 
                         if !trailing_comma_in_types && types.len() == 1 {
-                            let key = self.ast.state.types_exprs.parens.push_and_get_key(
+                            let key = self.ast.types_exprs.parens.push_and_get_key(
                                 nazmc_ast::ParenTypeExpr {
                                     underlying_typ: types.pop().unwrap(),
                                     file_key: self.file_key,
@@ -714,7 +717,7 @@ impl<'a> ASTValidator<'a> {
 
                             nazmc_ast::TypeExpr::Paren(key)
                         } else {
-                            let key = self.ast.state.types_exprs.tuples.push_and_get_key(
+                            let key = self.ast.types_exprs.tuples.push_and_get_key(
                                 nazmc_ast::TupleTypeExpr {
                                     types,
                                     file_key: self.file_key,
@@ -728,7 +731,7 @@ impl<'a> ASTValidator<'a> {
                 }
             };
 
-        self.ast.state.types_exprs.all.push_and_get_key(typ_expr)
+        self.ast.types_exprs.all.push_and_get_key(typ_expr)
     }
 
     fn lower_simple_path(&mut self, mut simple_path: SimplePath) -> nazmc_ast::ItemPath {
