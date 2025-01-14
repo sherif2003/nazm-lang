@@ -279,13 +279,13 @@ pub struct TupleStruct {
 #[derive(Clone)]
 pub struct FieldsStruct {
     pub info: ItemInfo,
-    pub fields: HashMap<IdKey, FieldInfo>,
+    pub fields: ThinVec<FieldInfo>,
 }
 
 #[derive(Clone)]
 pub struct FieldInfo {
     pub vis: VisModifier,
-    pub id_span: Span,
+    pub id: ASTId,
     pub typ: TypeExprKey,
 }
 

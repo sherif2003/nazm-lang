@@ -316,7 +316,8 @@ impl<'a> ASTValidator<'a> {
                             self.ast.state.pkgs_to_items[self.pkg_key].insert(id_key, item);
                         }
                         StructKind::Fields(struct_fields) => {
-                            let mut fields = HashMap::new();
+                            let mut fields_map = HashMap::new();
+                            let mut fields = ThinVec::new();
 
                             if let Some(PunctuatedStructField {
                                 first_item,
@@ -325,18 +326,20 @@ impl<'a> ASTValidator<'a> {
                             }) = struct_fields.items
                             {
                                 let (id, field_info) = self.lower_struct_field(first_item.unwrap());
-                                fields.insert(id, field_info);
+                                fields_map.insert(id, field_info.id.span);
+                                fields.push(field_info);
 
                                 for r in rest_items {
                                     let (id, field_info) = self.lower_struct_field(r.unwrap().item);
 
-                                    if let Some(field_with_same_id) = fields.get(&id) {
+                                    if let Some(span_of_field_with_same_id) = fields_map.get(&id) {
                                         self.struct_fields_conflicts_in_files
                                             .entry((id, self.file_key, name.span))
-                                            .or_insert_with(|| vec![field_with_same_id.id_span])
-                                            .push(field_info.id_span);
+                                            .or_insert_with(|| vec![*span_of_field_with_same_id])
+                                            .push(field_info.id.span);
                                     } else {
-                                        fields.insert(id, field_info);
+                                        fields_map.insert(id, field_info.id.span);
+                                        fields.push(field_info);
                                     }
                                 }
                             }
@@ -513,7 +516,10 @@ impl<'a> ASTValidator<'a> {
             field.name.data.val,
             nazmc_ast::FieldInfo {
                 vis,
-                id_span: field.name.span,
+                id: ASTId {
+                    span: field.name.span,
+                    id: field.name.data.val,
+                },
                 typ,
             },
         )

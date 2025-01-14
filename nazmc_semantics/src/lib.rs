@@ -13,7 +13,7 @@ use nazmc_diagnostics::{
 };
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
-use typed_ast::TypedAST;
+use typed_ast::{Type, TypeKey, TypedAST};
 
 #[derive(Default)]
 pub struct SemanticsStack {
@@ -28,6 +28,7 @@ pub struct SemanticsAnalyzer<'a> {
     pkgs_names: &'a TiSlice<PkgKey, &'a ThinVec<IdKey>>,
     ast: AST<Resolved>,
     typed_ast: TypedAST,
+    types_pool: DataPoolBuilder<TypeKey, Type>,
     semantics_stack: SemanticsStack,
     diagnostics: Vec<Diagnostic<'a>>,
 }
@@ -45,6 +46,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             pkgs_names,
             ast,
             typed_ast: Default::default(),
+            types_pool: Default::default(),
             semantics_stack: Default::default(),
             diagnostics: vec![],
         }

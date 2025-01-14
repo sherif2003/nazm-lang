@@ -7,7 +7,6 @@ new_data_pool_key! { TypeKey }
 
 #[derive(Default)]
 pub struct TypedAST {
-    pub types_pool: DataPoolBuilder<TypeKey, Type>,
     pub consts: HashMap<ConstKey, Const>,
     pub statics: HashMap<StaticKey, Static>,
     pub tuple_structs: HashMap<TupleStructKey, TupleStruct>,
@@ -17,100 +16,7 @@ pub struct TypedAST {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct Type {
-    pub kind: TypeKind,
-    pub size: u32,
-}
-
-impl Type {
-    pub const NEVER_TYPE: Self = Self {
-        kind: TypeKind::Never,
-        size: 0,
-    };
-
-    pub const UNIT_TYPE: Self = Self {
-        kind: TypeKind::Unit,
-        size: 0,
-    };
-
-    pub const I_TYPE: Self = Self {
-        kind: TypeKind::I,
-        size: isize::BITS / 8,
-    };
-
-    pub const I1_TYPE: Self = Self {
-        kind: TypeKind::I1,
-        size: 1,
-    };
-
-    pub const I2_TYPE: Self = Self {
-        kind: TypeKind::I2,
-        size: 2,
-    };
-
-    pub const I4_TYPE: Self = Self {
-        kind: TypeKind::I4,
-        size: 4,
-    };
-
-    pub const I8_TYPE: Self = Self {
-        kind: TypeKind::I8,
-        size: 8,
-    };
-
-    pub const U_TYPE: Self = Self {
-        kind: TypeKind::U,
-        size: usize::BITS / 8,
-    };
-
-    pub const U1_TYPE: Self = Self {
-        kind: TypeKind::U1,
-        size: 1,
-    };
-
-    pub const U2_TYPE: Self = Self {
-        kind: TypeKind::U2,
-        size: 2,
-    };
-
-    pub const U4_TYPE: Self = Self {
-        kind: TypeKind::U4,
-        size: 4,
-    };
-
-    pub const U8_TYPE: Self = Self {
-        kind: TypeKind::U8,
-        size: 8,
-    };
-
-    pub const F4_TYPE: Self = Self {
-        kind: TypeKind::F4,
-        size: 4,
-    };
-
-    pub const F8_TYPE: Self = Self {
-        kind: TypeKind::F8,
-        size: 8,
-    };
-
-    pub const BOOL_TYPE: Self = Self {
-        kind: TypeKind::Bool,
-        size: 1,
-    };
-
-    pub const CHAR_TYPE: Self = Self {
-        kind: TypeKind::Char,
-        size: 4,
-    };
-
-    pub const STR_TYPE: Self = Self {
-        kind: TypeKind::Char,
-        size: 0,
-    };
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub enum TypeKind {
+pub enum Type {
     #[default]
     Never,
     Unit,
@@ -142,18 +48,15 @@ pub enum TypeKind {
     Lambda(LambdaTypeKey),
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TupleType {
     pub types: ThinVec<TypeKey>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ArrayType {
     pub underlying_typ: TypeKey,
     pub size: u32,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LambdaType {
     pub params_types: ThinVec<TypeKey>,
     pub return_type: TypeKey,
@@ -169,11 +72,13 @@ pub struct Static {
 }
 
 pub struct TupleStruct {
-    pub types: ThinVec<TypeKey>,
+    pub types: ThinVec<FieldInfo>,
+    pub size: u32,
 }
 
 pub struct FieldsStruct {
     pub fields: HashMap<IdKey, FieldInfo>,
+    pub size: u32,
 }
 
 pub struct FieldInfo {
