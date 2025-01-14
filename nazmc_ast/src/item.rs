@@ -1,5 +1,8 @@
+use nazmc_data_pool::IdKey;
+
 use crate::{
-    ConstKey, FieldsStructKey, FnKey, StaticKey, TupleStructKey, UnitStructKey, VisModifier,
+    ConstKey, FieldsStructKey, FnKey, LetStmKey, StaticKey, TupleStructKey, UnitStructKey,
+    VisModifier,
 };
 
 #[derive(Clone, Copy, Default, Debug)]

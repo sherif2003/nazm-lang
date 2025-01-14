@@ -31,7 +31,6 @@ new_data_pool_key! { LambdaTypeExprKey }
 
 new_data_pool_key! { PkgKey }
 new_data_pool_key! { FileKey }
-new_data_pool_key! { TypeKey }
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
 new_data_pool_key! { FieldsStructKey }
@@ -71,7 +70,7 @@ pub struct Resolved {
     /// The list of all paths expressions that have leading pkgs paths
     pub paths_with_pkgs_exprs: TiVec<PathWithPkgKey, Item>,
     /// The list of resolved types paths expressions which point only to resolved structs
-    pub types_paths: TiVec<PathTypeExprKey, Type>,
+    pub types_paths: TiVec<PathTypeExprKey, Item>,
 }
 
 #[derive(Default)]

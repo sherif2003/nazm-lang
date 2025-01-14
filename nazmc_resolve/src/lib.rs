@@ -1,8 +1,8 @@
 use nazmc_ast::{
     ASTId, ArrayTypeExprKey, ConstKey, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey, Item,
     ItemInfo, ItemPath, PathNoPkgKey, PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey,
-    StarImportStm, StaticKey, TupleStructKey, TupleStructPathKey, Type, UnitStructKey,
-    UnitStructPathKey, VisModifier,
+    StarImportStm, StaticKey, TupleStructKey, TupleStructPathKey, UnitStructKey, UnitStructPathKey,
+    VisModifier,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -113,32 +113,24 @@ impl<'a> NameResolver<'a> {
             .map(|item_path| {
                 let file_key = item_path.pkg_path.file_key;
 
-                let item = self
-                    .resolve_item_path_from_local_file(
-                        file_key,
-                        item_path,
-                        &resolved_imports,
-                        &resolved_star_imports,
-                        |item| {
-                            matches!(
-                                item,
-                                Item::UnitStruct { .. }
-                                    | Item::TupleStruct { .. }
-                                    | Item::FieldsStruct { .. }
-                            )
-                        },
-                        "هيكل",
-                    )
-                    .unwrap_or_default();
-
-                match item {
-                    Item::UnitStruct { vis: _, key } => nazmc_ast::Type::UnitStruct(key),
-                    Item::TupleStruct { vis: _, key } => nazmc_ast::Type::TupleStruct(key),
-                    Item::FieldsStruct { vis: _, key } => nazmc_ast::Type::FieldsStruct(key),
-                    _ => nazmc_ast::Type::UnitStruct(UnitStructKey::default()),
-                }
+                self.resolve_item_path_from_local_file(
+                    file_key,
+                    item_path,
+                    &resolved_imports,
+                    &resolved_star_imports,
+                    |item| {
+                        matches!(
+                            item,
+                            Item::UnitStruct { .. }
+                                | Item::TupleStruct { .. }
+                                | Item::FieldsStruct { .. }
+                        )
+                    },
+                    "هيكل",
+                )
+                .unwrap_or_default()
             })
-            .collect::<TiVec<PathTypeExprKey, Type>>();
+            .collect::<TiVec<PathTypeExprKey, Item>>();
 
         let resolved_unit_structs_exprs = paths
             .unit_structs_paths_exprs
