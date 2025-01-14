@@ -1,3 +1,4 @@
+mod consts;
 mod typed_ast;
 mod types;
 
@@ -14,12 +15,20 @@ use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
 use typed_ast::TypedAST;
 
+#[derive(Default)]
+pub struct SemanticsStack {
+    pub consts: HashMap<ConstKey, ()>,
+    pub tuple_structs: HashMap<TupleStructKey, ()>,
+    pub fields_structs: HashMap<FieldsStructKey, ()>,
+}
+
 pub struct SemanticsAnalyzer<'a> {
     files_infos: &'a TiSlice<FileKey, FileInfo>,
     id_pool: &'a TiSlice<IdKey, String>,
     pkgs_names: &'a TiSlice<PkgKey, &'a ThinVec<IdKey>>,
     ast: AST<Resolved>,
     typed_ast: TypedAST,
+    semantics_stack: SemanticsStack,
     diagnostics: Vec<Diagnostic<'a>>,
 }
 
@@ -36,6 +45,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             pkgs_names,
             ast,
             typed_ast: Default::default(),
+            semantics_stack: Default::default(),
             diagnostics: vec![],
         }
     }
