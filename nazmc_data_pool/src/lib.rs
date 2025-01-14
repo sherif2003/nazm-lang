@@ -104,6 +104,16 @@ where
     }
 }
 
+impl<K, V> Default for DataPoolBuilder<K, V>
+where
+    K: From<usize> + Into<usize>,
+    V: Eq + Hash + Clone,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type IdPool = TiVec<IdKey, String>;
 
 pub type StrPool = TiVec<StrKey, String>;
