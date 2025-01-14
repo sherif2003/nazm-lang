@@ -43,6 +43,10 @@ new_data_pool_key! { FnKey }
 new_data_pool_key! { ScopeKey }
 new_data_pool_key! { LetStmKey }
 
+impl LetStmKey {
+    pub const FN_PARAMS_STM: Self = Self(0);
+}
+
 pub type PkgPoolBuilder = DataPoolBuilder<PkgKey, ThinVec<IdKey>>;
 
 pub const TOP_PKG_KEY: PkgKey = PkgKey(0);
@@ -109,8 +113,20 @@ impl AST<Unresolved> {
             ..Default::default()
         };
 
+        let fn_params_let_stm = LetStm {
+            binding: Binding {
+                kind: BindingKind::Id(ASTId {
+                    span: Default::default(),
+                    id: Default::default(),
+                }),
+                typ: None,
+            },
+            assign: None,
+        };
+
         Self {
             state,
+            lets: ti_vec![fn_params_let_stm; 1],
             ..Default::default()
         }
     }
@@ -200,17 +216,21 @@ pub fn expand_names_binding<'b>(kind: &'b BindingKind, bound_names: &mut Vec<&'b
     }
 }
 
-pub fn expand_names_binding_owned(kind: &BindingKind, bound_names: &mut Vec<IdKey>) {
+pub fn expand_names_binding_owned(
+    kind: &BindingKind,
+    bound_names: &mut Vec<(IdKey, LetStmKey)>,
+    let_stm_key: LetStmKey,
+) {
     match kind {
         BindingKind::Id(ast_id) => {
-            bound_names.push(ast_id.id);
+            bound_names.push((ast_id.id, let_stm_key));
         }
         BindingKind::MutId { id, .. } => {
-            bound_names.push(id.id);
+            bound_names.push((id.id, let_stm_key));
         }
         BindingKind::Tuple(bindings, ..) => {
             for binding_kind in bindings {
-                expand_names_binding_owned(binding_kind, bound_names);
+                expand_names_binding_owned(binding_kind, bound_names, let_stm_key);
             }
         }
     }

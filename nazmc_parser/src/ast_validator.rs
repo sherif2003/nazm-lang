@@ -457,7 +457,7 @@ impl<'a> ASTValidator<'a> {
                     nazmc_ast::Item::Const { key, .. } => self.ast.consts[key].info,
                     nazmc_ast::Item::Static { key, .. } => self.ast.statics[key].info,
                     nazmc_ast::Item::Fn { key, .. } => self.ast.fns[key].info,
-                    nazmc_ast::Item::Pkg | nazmc_ast::Item::LocalVar => {
+                    nazmc_ast::Item::Pkg | nazmc_ast::Item::LocalVar { .. } => {
                         unreachable!()
                     }
                 };

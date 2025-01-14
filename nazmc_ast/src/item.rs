@@ -33,5 +33,8 @@ pub enum Item {
         vis: VisModifier,
         key: FnKey,
     },
-    LocalVar,
+    LocalVar {
+        id: IdKey,
+        key: LetStmKey,
+    },
 }

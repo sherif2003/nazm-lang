@@ -1,8 +1,8 @@
 use nazmc_ast::{
     ASTId, ArrayTypeExprKey, ConstKey, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey, Item,
-    ItemInfo, ItemPath, PathNoPkgKey, PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey,
-    StarImportStm, StaticKey, TupleStructKey, TupleStructPathKey, UnitStructKey, UnitStructPathKey,
-    VisModifier,
+    ItemInfo, ItemPath, LetStmKey, PathNoPkgKey, PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath,
+    ScopeKey, StarImportStm, StaticKey, TupleStructKey, TupleStructPathKey, UnitStructKey,
+    UnitStructPathKey, VisModifier,
 };
 use nazmc_data_pool::{
     typed_index_collections::{ti_vec, TiSlice, TiVec},
@@ -348,7 +348,7 @@ impl<'a> NameResolver<'a> {
     fn resolve_paths_in_scope(
         &mut self,
         at: FileKey,
-        names_stack: &mut Vec<IdKey>,
+        names_stack: &mut Vec<(IdKey, LetStmKey)>,
         scope_key: ScopeKey,
         paths: &TiSlice<PathNoPkgKey, (ASTId, PkgKey)>,
         resolved_paths: &mut TiSlice<PathNoPkgKey, Item>,
@@ -358,20 +358,28 @@ impl<'a> NameResolver<'a> {
         let scope = &self.ast.scopes[scope_key];
 
         for name in &scope.extra_params {
-            names_stack.push(*name);
+            names_stack.push((*name, LetStmKey::FN_PARAMS_STM));
         }
 
         'label: for event in std::mem::take(&mut self.ast.state.scope_events[scope_key]) {
             match event {
                 nazmc_ast::ScopeEvent::Let(let_stm_key) => {
                     let let_stm = &self.ast.lets[let_stm_key];
-                    nazmc_ast::expand_names_binding_owned(&let_stm.binding.kind, names_stack);
+                    nazmc_ast::expand_names_binding_owned(
+                        &let_stm.binding.kind,
+                        names_stack,
+                        let_stm_key,
+                    );
                 }
                 nazmc_ast::ScopeEvent::Path(path_no_pkg_key) => {
                     let path_expr = &paths[path_no_pkg_key];
-                    for name in names_stack.iter().rev() {
+                    for (name, let_stm_key) in names_stack.iter().rev() {
                         if *name == path_expr.0.id {
-                            resolved_paths[path_no_pkg_key] = Item::LocalVar;
+                            resolved_paths[path_no_pkg_key] = Item::LocalVar {
+                                id: *name,
+                                key: *let_stm_key,
+                            };
+
                             continue 'label;
                         }
                     }
@@ -947,7 +955,7 @@ impl<'a> NameResolver<'a> {
                 "لا يمكن الوصول إلى الدالة `{}` لأنها خاصة بالحزمة التابعة لها",
                 name
             ),
-            Item::Pkg | Item::LocalVar => {
+            _ => {
                 unreachable!()
             }
         };
@@ -986,13 +994,13 @@ impl<'a> NameResolver<'a> {
 
     fn get_item_info(&self, item: Item) -> ItemInfo {
         match item {
-            nazmc_ast::Item::UnitStruct { key, .. } => self.ast.unit_structs[key].info,
-            nazmc_ast::Item::TupleStruct { key, .. } => self.ast.tuple_structs[key].info,
-            nazmc_ast::Item::FieldsStruct { key, .. } => self.ast.fields_structs[key].info,
-            nazmc_ast::Item::Const { key, .. } => self.ast.consts[key].info,
-            nazmc_ast::Item::Static { key, .. } => self.ast.statics[key].info,
-            nazmc_ast::Item::Fn { key, .. } => self.ast.fns[key].info,
-            nazmc_ast::Item::Pkg | nazmc_ast::Item::LocalVar => {
+            Item::UnitStruct { key, .. } => self.ast.unit_structs[key].info,
+            Item::TupleStruct { key, .. } => self.ast.tuple_structs[key].info,
+            Item::FieldsStruct { key, .. } => self.ast.fields_structs[key].info,
+            Item::Const { key, .. } => self.ast.consts[key].info,
+            Item::Static { key, .. } => self.ast.statics[key].info,
+            Item::Fn { key, .. } => self.ast.fns[key].info,
+            Item::Pkg | Item::LocalVar { .. } => {
                 unreachable!()
             }
         }
@@ -1015,7 +1023,7 @@ fn item_kind_to_str(item: Item) -> &'static str {
         Item::Const { .. } => "ثابت",
         Item::Static { .. } => "مشترك",
         Item::Fn { .. } => "دالة",
-        Item::LocalVar => unreachable!(),
+        Item::LocalVar { .. } => unreachable!(),
     }
 }
 
@@ -1028,6 +1036,6 @@ fn explicit_item_kind_to_str(item: Item) -> &'static str {
         Item::Const { .. } => "ثابت",
         Item::Static { .. } => "مشترك",
         Item::Fn { .. } => "دالة",
-        Item::LocalVar => unreachable!(),
+        Item::LocalVar { .. } => unreachable!(),
     }
 }
