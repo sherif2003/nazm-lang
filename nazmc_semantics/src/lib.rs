@@ -45,6 +45,7 @@ pub struct SemanticsAnalyzer<'a> {
     lambda_types_pool: DataPoolBuilder<LambdaTypeKey, LambdaType>,
     semantics_stack: SemanticsStack,
     diagnostics: Vec<Diagnostic<'a>>,
+    cycle_stack: Vec<Diagnostic<'a>>,
 }
 
 impl<'a> SemanticsAnalyzer<'a> {

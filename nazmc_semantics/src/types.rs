@@ -50,23 +50,93 @@ impl<'a> SemanticsAnalyzer<'a> {
             return result;
         }
 
-        let span = self.get_type_expr_span(type_expr_key);
+        let type_expr_span = self.get_type_expr_span(type_expr_key);
 
         if self.semantics_stack.is_cycle_detected == called_from {
-            self.semantics_stack.is_cycle_detected = CycleDetected::None;
-            let mut code_window = CodeWindow::new(&self.files_infos[at], span.start);
-            code_window.mark_error(span, vec![]);
-
-            self.diagnostics
-                .last_mut()
-                .unwrap()
-                .push_code_window(code_window);
-        } else {
-            match self.semantics_stack.is_cycle_detected {
+            match called_from {
                 CycleDetected::None => {}
                 CycleDetected::Const(const_key) => todo!(),
-                CycleDetected::TupleStruct(tuple_struct_key) => todo!(),
-                CycleDetected::FieldsStruct(fields_struct_key) => {}
+                CycleDetected::TupleStruct(tuple_struct_key) => {
+                    let item_info = self.ast.tuple_structs[tuple_struct_key].info;
+                    let msg = format!(
+                        "توجد حلقة لا متناهية في تحديد حجم الهيكل `{}`",
+                        self.fmt_item_name(item_info)
+                    );
+                    let (err_label, sec_label) = if self.cycle_stack.is_empty() {
+                        ("", "")
+                    } else {
+                        ("", "")
+                    };
+
+                    let mut code_window =
+                        CodeWindow::new(&self.files_infos[at], type_expr_span.start);
+
+                    code_window.mark_error(type_expr_span, vec![err_label.into()]);
+                    code_window.mark_secondary(item_info.id_span, vec![sec_label.into()]);
+
+                    let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+                    for cycle in std::mem::take(&mut self.cycle_stack).into_iter().rev() {
+                        diagnostic.chain(cycle);
+                    }
+
+                    self.diagnostics.push(diagnostic);
+                }
+                CycleDetected::FieldsStruct(fields_struct_key) => {
+                    let item_info = self.ast.fields_structs[fields_struct_key].info;
+                    let msg = format!(
+                        "توجد حلقة لا متناهية في تحديد حجم الهيكل `{}`",
+                        self.fmt_item_name(item_info)
+                    );
+                    let label = if self.cycle_stack.is_empty() { "" } else { "" };
+
+                    let mut code_window =
+                        CodeWindow::new(&self.files_infos[at], type_expr_span.start);
+                    code_window.mark_error(type_expr_span, vec![]);
+                    code_window.mark_secondary(item_info.id_span, vec!["في هذا الهيكل".into()]);
+
+                    let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+                    for cycle in std::mem::take(&mut self.cycle_stack).into_iter().rev() {
+                        diagnostic.chain(cycle);
+                    }
+
+                    self.diagnostics.push(diagnostic);
+                }
+            }
+
+            self.semantics_stack.is_cycle_detected = CycleDetected::None;
+        } else {
+            match called_from {
+                CycleDetected::None => {}
+                CycleDetected::Const(const_key) => todo!(),
+                CycleDetected::TupleStruct(tuple_struct_key) => {
+                    let item_info = self.ast.tuple_structs[tuple_struct_key].info;
+
+                    let msg = format!("عند تحديد حجم الهيكل `{}`", self.fmt_item_name(item_info));
+
+                    let mut code_window =
+                        CodeWindow::new(&self.files_infos[at], type_expr_span.start);
+                    code_window.mark_note(type_expr_span, vec![]);
+                    code_window.mark_secondary(item_info.id_span, vec!["في هذا الهيكل".into()]);
+
+                    let diagnostic = Diagnostic::note(msg, vec![code_window]);
+
+                    self.cycle_stack.push(diagnostic);
+                }
+                CycleDetected::FieldsStruct(fields_struct_key) => {
+                    let item_info = self.ast.fields_structs[fields_struct_key].info;
+                    let msg = format!("عند تحديد حجم الهيكل `{}`", self.fmt_item_name(item_info));
+
+                    let mut code_window =
+                        CodeWindow::new(&self.files_infos[at], type_expr_span.start);
+                    code_window.mark_note(type_expr_span, vec![]);
+                    code_window.mark_secondary(item_info.id_span, vec!["في هذا الهيكل".into()]);
+
+                    let diagnostic = Diagnostic::note(msg, vec![code_window]);
+
+                    self.cycle_stack.push(diagnostic);
+                }
             }
         }
         result
@@ -192,12 +262,19 @@ impl<'a> SemanticsAnalyzer<'a> {
             // It is already computed
             return;
         } else if self.semantics_stack.tuple_structs.contains_key(&key) {
-            self.add_cycle_detected_err_for_tuple_struct(key);
+            self.semantics_stack.is_cycle_detected = CycleDetected::TupleStruct(key);
+
+            self.typed_ast.tuple_structs.insert(key, Default::default());
+
+            self.semantics_stack.tuple_structs.remove(&key);
+
             return;
         }
 
         self.semantics_stack.tuple_structs.insert(key, ());
 
+        let at = self.ast.tuple_structs[key].info.file_key;
+        let called_from = CycleDetected::TupleStruct(key);
         let types_len = self.ast.tuple_structs[key].types.len();
         let mut types = ThinVec::with_capacity(types_len);
         let mut max_align = 0;
@@ -207,7 +284,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         for i in 0..types_len {
             let type_expr_key = self.ast.tuple_structs[key].types[i].1;
-            let (typ, size, align) = self.analyze_type_expr(type_expr_key);
+            let (typ, size, align) = self.analyze_type_expr_checked(type_expr_key, at, called_from);
 
             if size < 0 {
                 // TODO: Unsized type
@@ -247,7 +324,14 @@ impl<'a> SemanticsAnalyzer<'a> {
             // It is already computed
             return;
         } else if self.semantics_stack.fields_structs.contains_key(&key) {
-            self.add_cycle_detected_err_for_fields_struct(key);
+            self.semantics_stack.is_cycle_detected = CycleDetected::FieldsStruct(key);
+
+            self.typed_ast
+                .fields_structs
+                .insert(key, Default::default());
+
+            self.semantics_stack.fields_structs.remove(&key);
+
             return;
         }
 
@@ -369,39 +453,5 @@ impl<'a> SemanticsAnalyzer<'a> {
         });
 
         (Type::Lambda(key), Self::PTR_SIZE, Self::PTR_SIZE as u8)
-    }
-
-    fn add_cycle_detected_err_for_tuple_struct(&mut self, key: TupleStructKey) {
-        self.semantics_stack.is_cycle_detected = CycleDetected::TupleStruct(key);
-
-        self.typed_ast.tuple_structs.insert(key, Default::default());
-
-        self.semantics_stack.tuple_structs.remove(&key);
-
-        let item_info = self.ast.tuple_structs[key].info;
-        let msg = format!(
-            "توجد حلقة لا متناهية في تحديد حجم الهيكل `{}`",
-            self.fmt_item_name(item_info)
-        );
-        let diagnostic = Diagnostic::error(msg, vec![]);
-        self.diagnostics.push(diagnostic);
-    }
-
-    fn add_cycle_detected_err_for_fields_struct(&mut self, key: FieldsStructKey) {
-        self.semantics_stack.is_cycle_detected = CycleDetected::FieldsStruct(key);
-
-        self.typed_ast
-            .fields_structs
-            .insert(key, Default::default());
-
-        self.semantics_stack.fields_structs.remove(&key);
-
-        let item_info = self.ast.fields_structs[key].info;
-        let msg = format!(
-            "توجد حلقة لا متناهية في تحديد حجم الهيكل `{}`",
-            self.fmt_item_name(item_info)
-        );
-        let diagnostic = Diagnostic::error(msg, vec![]);
-        self.diagnostics.push(diagnostic);
     }
 }
