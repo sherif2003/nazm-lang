@@ -62,6 +62,7 @@ pub struct Unresolved {
 }
 
 /// Holds resolved paths
+#[derive(Default)]
 pub struct Resolved {
     /// The list of all unit struct expressions paths
     pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, UnitStructKey>,
@@ -181,7 +182,7 @@ pub struct ImportStm {
     pub alias: ASTId,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct ASTId {
     pub span: Span,
     pub id: IdKey,
@@ -244,52 +245,52 @@ pub enum VisModifier {
     Private,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct ItemInfo {
     pub file_key: FileKey,
     pub id_key: IdKey,
     pub id_span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Const {
     pub info: ItemInfo,
     pub typ: TypeExprKey,
     pub expr_scope_key: ScopeKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Static {
     pub info: ItemInfo,
     pub typ: TypeExprKey,
     pub expr_scope_key: ScopeKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct UnitStruct {
     pub info: ItemInfo,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TupleStruct {
     pub info: ItemInfo,
     pub types: ThinVec<(VisModifier, TypeExprKey)>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FieldsStruct {
     pub info: ItemInfo,
     pub fields: ThinVec<FieldInfo>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FieldInfo {
     pub vis: VisModifier,
     pub id: ASTId,
     pub typ: TypeExprKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Fn {
     pub info: ItemInfo,
     pub params: ThinVec<(ASTId, TypeExprKey)>,

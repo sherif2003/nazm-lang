@@ -22,6 +22,7 @@ pub struct SemanticsStack {
     pub fields_structs: HashMap<FieldsStructKey, ()>,
 }
 
+#[derive(Default)]
 pub struct SemanticsAnalyzer<'a> {
     files_infos: &'a TiSlice<FileKey, FileInfo>,
     id_pool: &'a TiSlice<IdKey, String>,
@@ -45,10 +46,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             id_pool,
             pkgs_names,
             ast,
-            typed_ast: Default::default(),
-            types_pool: Default::default(),
-            semantics_stack: Default::default(),
-            diagnostics: vec![],
+            ..Default::default()
         }
     }
 
