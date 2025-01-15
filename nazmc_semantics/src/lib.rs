@@ -15,12 +15,20 @@ use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
 use typed_ast::{ArrayType, LambdaType, TupleType, Type, TypeKey, TypedAST};
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum CycleDetected {
+    #[default]
+    None,
+    Const(ConstKey),
+    TupleStruct(TupleStructKey),
+    FieldsStruct(FieldsStructKey),
+}
 #[derive(Default)]
 struct SemanticsStack {
     consts: HashMap<ConstKey, ()>,
     tuple_structs: HashMap<TupleStructKey, ()>,
     fields_structs: HashMap<FieldsStructKey, ()>,
-    is_cycle_detected: bool,
+    is_cycle_detected: CycleDetected,
 }
 
 #[derive(Default)]

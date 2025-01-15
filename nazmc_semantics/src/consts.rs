@@ -13,6 +13,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             return;
         } else if self.semantics_stack.consts.contains_key(&const_key) {
             // TODO: Cycle detected
+            self.semantics_stack.is_cycle_detected = CycleDetected::Const(const_key);
             panic!("Cycle detected");
             return;
         }

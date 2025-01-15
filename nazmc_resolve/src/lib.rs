@@ -112,25 +112,29 @@ impl<'a> NameResolver<'a> {
             .into_iter()
             .map(|item_path| {
                 let file_key = item_path.pkg_path.file_key;
+                let span = item_path.get_span();
 
-                self.resolve_item_path_from_local_file(
-                    file_key,
-                    item_path,
-                    &resolved_imports,
-                    &resolved_star_imports,
-                    |item| {
-                        matches!(
-                            item,
-                            Item::UnitStruct { .. }
-                                | Item::TupleStruct { .. }
-                                | Item::FieldsStruct { .. }
-                        )
-                    },
-                    "هيكل",
-                )
-                .unwrap_or_default()
+                let item = self
+                    .resolve_item_path_from_local_file(
+                        file_key,
+                        item_path,
+                        &resolved_imports,
+                        &resolved_star_imports,
+                        |item| {
+                            matches!(
+                                item,
+                                Item::UnitStruct { .. }
+                                    | Item::TupleStruct { .. }
+                                    | Item::FieldsStruct { .. }
+                            )
+                        },
+                        "هيكل",
+                    )
+                    .unwrap_or_default();
+
+                (item, span)
             })
-            .collect::<TiVec<PathTypeExprKey, Item>>();
+            .collect::<TiVec<PathTypeExprKey, (Item, Span)>>();
 
         let resolved_unit_structs_exprs = paths
             .unit_structs_paths_exprs

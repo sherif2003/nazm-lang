@@ -75,7 +75,7 @@ pub struct Resolved {
     /// The list of all paths expressions that have leading pkgs paths
     pub paths_with_pkgs_exprs: TiVec<PathWithPkgKey, Item>,
     /// The list of resolved types paths expressions which point only to resolved structs
-    pub types_paths: TiVec<PathTypeExprKey, Item>,
+    pub types_paths: TiVec<PathTypeExprKey, (Item, Span)>,
 }
 
 #[derive(Default)]
@@ -168,6 +168,18 @@ pub struct ItemPath {
     pub top_pkg_span: Option<Span>,
     pub pkg_path: PkgPath,
     pub item: ASTId,
+}
+
+impl ItemPath {
+    pub fn get_span(&self) -> Span {
+        if let Some(span) = self.top_pkg_span {
+            span.merged_with(&self.item.span)
+        } else if let Some(span) = self.pkg_path.spans.first() {
+            span.merged_with(&self.item.span)
+        } else {
+            self.item.span
+        }
+    }
 }
 
 #[derive(Clone)]

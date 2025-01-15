@@ -9,6 +9,69 @@ type TypeLayout = (TypeKey, i32, u8);
 impl<'a> SemanticsAnalyzer<'a> {
     const PTR_SIZE: i32 = usize::BITS as i32 / 8;
 
+    fn get_type_expr_span(&self, type_expr_key: TypeExprKey) -> Span {
+        match &self.ast.types_exprs.all[type_expr_key] {
+            TypeExpr::Path(path_type_expr_key) => self.ast.state.types_paths[*path_type_expr_key].1,
+            TypeExpr::Paren(paren_type_expr_key) => {
+                self.ast.types_exprs.parens[*paren_type_expr_key].span
+            }
+            TypeExpr::Slice(slice_type_expr_key) => {
+                self.ast.types_exprs.slices[*slice_type_expr_key].span
+            }
+            TypeExpr::Ptr(ptr_type_expr_key) => self.ast.types_exprs.ptrs[*ptr_type_expr_key].span,
+            TypeExpr::Ref(ref_type_expr_key) => self.ast.types_exprs.refs[*ref_type_expr_key].span,
+            TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
+                self.ast.types_exprs.ptrs_mut[*ptr_mut_type_expr_key].span
+            }
+            TypeExpr::RefMut(ref_mut_type_expr_key) => {
+                self.ast.types_exprs.refs_mut[*ref_mut_type_expr_key].span
+            }
+            TypeExpr::Tuple(tuple_type_expr_key) => {
+                self.ast.types_exprs.tuples[*tuple_type_expr_key].span
+            }
+            TypeExpr::Array(array_type_expr_key) => {
+                self.ast.types_exprs.arrays[*array_type_expr_key].span
+            }
+            TypeExpr::Lambda(lambda_type_expr_key) => {
+                self.ast.types_exprs.lambdas[*lambda_type_expr_key].span
+            }
+        }
+    }
+
+    fn analyze_type_expr_checked(
+        &mut self,
+        type_expr_key: TypeExprKey,
+        at: FileKey,
+        called_from: CycleDetected,
+    ) -> (TypeKey, i32, u8) {
+        let result = self.analyze_type_expr(type_expr_key);
+
+        if self.semantics_stack.is_cycle_detected == CycleDetected::None {
+            return result;
+        }
+
+        let span = self.get_type_expr_span(type_expr_key);
+
+        if self.semantics_stack.is_cycle_detected == called_from {
+            self.semantics_stack.is_cycle_detected = CycleDetected::None;
+            let mut code_window = CodeWindow::new(&self.files_infos[at], span.start);
+            code_window.mark_error(span, vec![]);
+
+            self.diagnostics
+                .last_mut()
+                .unwrap()
+                .push_code_window(code_window);
+        } else {
+            match self.semantics_stack.is_cycle_detected {
+                CycleDetected::None => {}
+                CycleDetected::Const(const_key) => todo!(),
+                CycleDetected::TupleStruct(tuple_struct_key) => todo!(),
+                CycleDetected::FieldsStruct(fields_struct_key) => {}
+            }
+        }
+        result
+    }
+
     pub(crate) fn analyze_type_expr(&mut self, type_expr_key: TypeExprKey) -> (TypeKey, i32, u8) {
         let type_expr = &self.ast.types_exprs.all[type_expr_key];
         let (typ, size, align) = match type_expr {
@@ -75,7 +138,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     #[inline]
     fn analyze_path_type_expr(&mut self, key: PathTypeExprKey) -> (Type, i32, u8) {
-        let path_type = &self.ast.state.types_paths[key];
+        let (path_type, _span) = &self.ast.state.types_paths[key];
         match path_type {
             Item::UnitStruct { vis: _, key } => self.analyze_unit_struct(*key),
             Item::TupleStruct { vis: _, key } => {
@@ -190,6 +253,8 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         self.semantics_stack.fields_structs.insert(key, ());
 
+        let at = self.ast.fields_structs[key].info.file_key;
+        let called_from = CycleDetected::FieldsStruct(key);
         let fields_len = self.ast.fields_structs[key].fields.len();
         let mut fields = HashMap::with_capacity(fields_len);
         let mut max_align = 0;
@@ -203,7 +268,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 typ,
             } = self.ast.fields_structs[key].fields[i];
 
-            let (typ, size, align) = self.analyze_type_expr(typ);
+            let (typ, size, align) = self.analyze_type_expr_checked(typ, at, called_from);
 
             if size < 0 {
                 // TODO: Unsized fields
@@ -307,6 +372,8 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     fn add_cycle_detected_err_for_tuple_struct(&mut self, key: TupleStructKey) {
+        self.semantics_stack.is_cycle_detected = CycleDetected::TupleStruct(key);
+
         self.typed_ast.tuple_structs.insert(key, Default::default());
 
         self.semantics_stack.tuple_structs.remove(&key);
@@ -321,6 +388,8 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     fn add_cycle_detected_err_for_fields_struct(&mut self, key: FieldsStructKey) {
+        self.semantics_stack.is_cycle_detected = CycleDetected::FieldsStruct(key);
+
         self.typed_ast
             .fields_structs
             .insert(key, Default::default());
