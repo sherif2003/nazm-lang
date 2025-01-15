@@ -12,6 +12,8 @@ impl<'a> SemanticsAnalyzer<'a> {
         let (typ, size, align) = match type_expr {
             TypeExpr::Path(path_type_expr_key) => self.analyze_path_type_expr(*path_type_expr_key),
             TypeExpr::Tuple(tuple_type_expr_key) => self.analyze_tuple(*tuple_type_expr_key),
+            TypeExpr::Array(array_type_expr_key) => self.analyze_array(*array_type_expr_key),
+            TypeExpr::Lambda(lambda_type_expr_key) => self.analyze_lambda(*lambda_type_expr_key),
             TypeExpr::Paren(paren_type_expr_key) => {
                 return self.analyze_type_expr(
                     self.ast.types_exprs.parens[*paren_type_expr_key].underlying_typ,
@@ -65,12 +67,11 @@ impl<'a> SemanticsAnalyzer<'a> {
                 };
                 (Type::RefMut(underlying_type_key), size, align)
             }
-            TypeExpr::Array(array_type_expr_key) => todo!(),
-            TypeExpr::Lambda(lambda_type_expr_key) => todo!(),
         };
         (self.types_pool.get_key(&typ), size, align)
     }
 
+    #[inline]
     fn analyze_path_type_expr(&mut self, key: PathTypeExprKey) -> (Type, i32, u8) {
         let path_type = &self.ast.state.types_paths[key];
         match path_type {
@@ -92,6 +93,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
+    #[inline]
     fn analyze_unit_struct(&mut self, key: UnitStructKey) -> (Type, i32, u8) {
         let info = &self.ast.unit_structs[key].info;
         let file_path = &self.files_infos[info.file_key].path;
@@ -119,9 +121,11 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
+    #[inline]
     fn analyze_tuple_struct(&mut self, key: TupleStructKey) {
         if self.semantics_stack.tuple_structs.contains_key(&key) {
             // TODO: Cycle detected
+            panic!("Cycle detected");
             return;
         } else if self.typed_ast.tuple_structs.contains_key(&key) {
             // It is already computed
@@ -143,6 +147,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
             if size < 0 {
                 // TODO: Unsized type
+                panic!("Unsized type")
             }
 
             if align > max_align {
@@ -172,9 +177,11 @@ impl<'a> SemanticsAnalyzer<'a> {
         );
     }
 
+    #[inline]
     fn analyze_fields_struct(&mut self, key: FieldsStructKey) {
         if self.semantics_stack.fields_structs.contains_key(&key) {
             // TODO: Cycle detected
+            panic!("Cycle detected");
             return;
         } else if self.typed_ast.fields_structs.contains_key(&key) {
             // It is already computed
@@ -229,6 +236,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         );
     }
 
+    #[inline]
     fn analyze_tuple(&mut self, key: TupleTypeExprKey) -> (Type, i32, u8) {
         let types_len = self.ast.types_exprs.tuples[key].types.len();
         let mut types = ThinVec::with_capacity(types_len);
@@ -263,5 +271,38 @@ impl<'a> SemanticsAnalyzer<'a> {
         let key = self.tuple_types_pool.get_key(&TupleType { types });
 
         (Type::Tuple(key), offset as i32, max_align)
+    }
+
+    #[inline]
+    fn analyze_array(&mut self, key: ArrayTypeExprKey) -> (Type, i32, u8) {
+        let underlying_typ = self.ast.types_exprs.arrays[key].underlying_typ;
+
+        let (underlying_typ, underlying_typ_size, underlying_typ_align) =
+            self.analyze_type_expr(underlying_typ);
+
+        let size_expr_scope_key = self.ast.types_exprs.arrays[key].size_expr_scope_key;
+        todo!()
+    }
+
+    #[inline]
+    fn analyze_lambda(&mut self, key: LambdaTypeExprKey) -> (Type, i32, u8) {
+        let params_types_len = self.ast.types_exprs.lambdas[key].params_types.len();
+        let mut params_types = ThinVec::with_capacity(params_types_len);
+
+        for i in 0..params_types_len {
+            let type_expr_key = self.ast.types_exprs.lambdas[key].params_types[i];
+            params_types.push(self.analyze_type_expr(type_expr_key).0);
+        }
+
+        let return_type = self
+            .analyze_type_expr(self.ast.types_exprs.lambdas[key].return_type)
+            .0;
+
+        let key = self.lambda_types_pool.get_key(&LambdaType {
+            params_types,
+            return_type,
+        });
+
+        (Type::Lambda(key), Self::PTR_SIZE, Self::PTR_SIZE as u8)
     }
 }

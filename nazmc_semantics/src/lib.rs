@@ -13,7 +13,7 @@ use nazmc_diagnostics::{
 };
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
-use typed_ast::{ArrayType, TupleType, Type, TypeKey, TypedAST};
+use typed_ast::{ArrayType, LambdaType, TupleType, Type, TypeKey, TypedAST};
 
 #[derive(Default)]
 pub struct SemanticsStack {
@@ -31,6 +31,8 @@ pub struct SemanticsAnalyzer<'a> {
     typed_ast: TypedAST,
     types_pool: DataPoolBuilder<TypeKey, Type>,
     tuple_types_pool: DataPoolBuilder<TupleTypeKey, TupleType>,
+    array_types_pool: DataPoolBuilder<ArrayTypeKey, ArrayType>,
+    lambda_types_pool: DataPoolBuilder<LambdaTypeKey, LambdaType>,
     semantics_stack: SemanticsStack,
     diagnostics: Vec<Diagnostic<'a>>,
 }

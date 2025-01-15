@@ -10,6 +10,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     fn analyze_const(&mut self, const_key: ConstKey) {
         if self.semantics_stack.consts.contains_key(&const_key) {
             // TODO: Cycle detected
+            panic!("Cycle detected");
             return;
         }
         if self.typed_ast.consts.contains_key(&const_key) {
