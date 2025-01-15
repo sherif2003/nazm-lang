@@ -15,7 +15,7 @@ pub struct TypedAST {
     pub lets: HashMap<LetStmKey, LetStm>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub enum Type {
     #[default]
     Never,
@@ -48,15 +48,18 @@ pub enum Type {
     Lambda(LambdaTypeKey),
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TupleType {
-    pub types: ThinVec<TypeKey>,
+    pub types: ThinVec<FieldInfo>,
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct ArrayType {
     pub underlying_typ: TypeKey,
     pub size: u32,
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct LambdaType {
     pub params_types: ThinVec<TypeKey>,
     pub return_type: TypeKey,
@@ -83,6 +86,7 @@ pub struct FieldsStruct {
     pub align: u8,
 }
 
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct FieldInfo {
     pub offset: u32,
     pub typ: TypeKey,

@@ -1,15 +1,17 @@
 use std::{net::UdpSocket, path};
 
-use typed_ast::{FieldsStruct, TupleStruct, Type, TypeKey};
+use typed_ast::{FieldsStruct, TupleStruct, TupleType, Type, TypeKey};
 
 use crate::*;
 
 impl<'a> SemanticsAnalyzer<'a> {
     const PTR_SIZE: i32 = usize::BITS as i32 / 8;
+
     pub(crate) fn analyze_type_expr(&mut self, type_expr_key: TypeExprKey) -> (TypeKey, i32, u8) {
         let type_expr = &self.ast.types_exprs.all[type_expr_key];
         let (typ, size, align) = match type_expr {
             TypeExpr::Path(path_type_expr_key) => self.analyze_path_type_expr(*path_type_expr_key),
+            TypeExpr::Tuple(tuple_type_expr_key) => self.analyze_tuple(*tuple_type_expr_key),
             TypeExpr::Paren(paren_type_expr_key) => {
                 return self.analyze_type_expr(
                     self.ast.types_exprs.parens[*paren_type_expr_key].underlying_typ,
@@ -63,7 +65,6 @@ impl<'a> SemanticsAnalyzer<'a> {
                 };
                 (Type::RefMut(underlying_type_key), size, align)
             }
-            TypeExpr::Tuple(tuple_type_expr_key) => todo!(),
             TypeExpr::Array(array_type_expr_key) => todo!(),
             TypeExpr::Lambda(lambda_type_expr_key) => todo!(),
         };
@@ -226,5 +227,41 @@ impl<'a> SemanticsAnalyzer<'a> {
                 align: max_align,
             },
         );
+    }
+
+    fn analyze_tuple(&mut self, key: TupleTypeExprKey) -> (Type, i32, u8) {
+        let types_len = self.ast.types_exprs.tuples[key].types.len();
+        let mut types = ThinVec::with_capacity(types_len);
+        let mut max_align = 0;
+        let mut offset: u32 = 0;
+
+        // FIXME: This is not tested
+
+        for i in 0..types_len {
+            let type_expr_key = self.ast.types_exprs.tuples[key].types[i];
+            let (typ, size, align) = self.analyze_type_expr(type_expr_key);
+
+            if size < 0 {
+                // TODO: Unsized type
+            }
+
+            if align > max_align {
+                max_align = align;
+            }
+
+            let aligned_offset = (i * align as usize) as u32;
+            if aligned_offset > offset {
+                offset = aligned_offset;
+            }
+
+            types.push(typed_ast::FieldInfo { offset, typ });
+            offset += size as u32;
+        }
+
+        // TODO: Reorder types
+
+        let key = self.tuple_types_pool.get_key(&TupleType { types });
+
+        (Type::Tuple(key), offset as i32, max_align)
     }
 }
