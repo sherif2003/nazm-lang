@@ -148,19 +148,19 @@ impl IdPoolBuilder {
         self.get_key(&"س".to_string());
 
         self.get_key(&"ص".to_string());
-        self.get_key(&"1ص".to_string());
-        self.get_key(&"2ص".to_string());
-        self.get_key(&"4ص".to_string());
-        self.get_key(&"8ص".to_string());
+        self.get_key(&"ص1".to_string());
+        self.get_key(&"ص2".to_string());
+        self.get_key(&"ص4".to_string());
+        self.get_key(&"ص8".to_string());
 
         self.get_key(&"ط".to_string());
-        self.get_key(&"1ط".to_string());
-        self.get_key(&"2ط".to_string());
-        self.get_key(&"4ط".to_string());
-        self.get_key(&"8ط".to_string());
+        self.get_key(&"ط1".to_string());
+        self.get_key(&"ط2".to_string());
+        self.get_key(&"ط4".to_string());
+        self.get_key(&"ط8".to_string());
 
-        self.get_key(&"4ع".to_string());
-        self.get_key(&"8ع".to_string());
+        self.get_key(&"ع4".to_string());
+        self.get_key(&"ع8".to_string());
 
         self.get_key(&"شرط".to_string());
         self.get_key(&"حرف".to_string());

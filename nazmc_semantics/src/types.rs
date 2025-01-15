@@ -4,6 +4,8 @@ use typed_ast::{FieldsStruct, TupleStruct, TupleType, Type, TypeKey};
 
 use crate::*;
 
+type TypeLayout = (TypeKey, i32, u8);
+
 impl<'a> SemanticsAnalyzer<'a> {
     const PTR_SIZE: i32 = usize::BITS as i32 / 8;
 
@@ -123,12 +125,11 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     #[inline]
     fn analyze_tuple_struct(&mut self, key: TupleStructKey) {
-        if self.semantics_stack.tuple_structs.contains_key(&key) {
-            // TODO: Cycle detected
-            panic!("Cycle detected");
-            return;
-        } else if self.typed_ast.tuple_structs.contains_key(&key) {
+        if self.typed_ast.tuple_structs.contains_key(&key) {
             // It is already computed
+            return;
+        } else if self.semantics_stack.tuple_structs.contains_key(&key) {
+            self.add_cycle_detected_err_for_tuple_struct(key);
             return;
         }
 
@@ -179,12 +180,11 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     #[inline]
     fn analyze_fields_struct(&mut self, key: FieldsStructKey) {
-        if self.semantics_stack.fields_structs.contains_key(&key) {
-            // TODO: Cycle detected
-            panic!("Cycle detected");
-            return;
-        } else if self.typed_ast.fields_structs.contains_key(&key) {
+        if self.typed_ast.fields_structs.contains_key(&key) {
             // It is already computed
+            return;
+        } else if self.semantics_stack.fields_structs.contains_key(&key) {
+            self.add_cycle_detected_err_for_fields_struct(key);
             return;
         }
 
@@ -304,5 +304,35 @@ impl<'a> SemanticsAnalyzer<'a> {
         });
 
         (Type::Lambda(key), Self::PTR_SIZE, Self::PTR_SIZE as u8)
+    }
+
+    fn add_cycle_detected_err_for_tuple_struct(&mut self, key: TupleStructKey) {
+        self.typed_ast.tuple_structs.insert(key, Default::default());
+
+        self.semantics_stack.tuple_structs.remove(&key);
+
+        let item_info = self.ast.tuple_structs[key].info;
+        let msg = format!(
+            "توجد حلقة لا متناهية في تحديد حجم الهيكل `{}`",
+            self.fmt_item_name(item_info)
+        );
+        let diagnostic = Diagnostic::error(msg, vec![]);
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn add_cycle_detected_err_for_fields_struct(&mut self, key: FieldsStructKey) {
+        self.typed_ast
+            .fields_structs
+            .insert(key, Default::default());
+
+        self.semantics_stack.fields_structs.remove(&key);
+
+        let item_info = self.ast.fields_structs[key].info;
+        let msg = format!(
+            "توجد حلقة لا متناهية في تحديد حجم الهيكل `{}`",
+            self.fmt_item_name(item_info)
+        );
+        let diagnostic = Diagnostic::error(msg, vec![]);
+        self.diagnostics.push(diagnostic);
     }
 }

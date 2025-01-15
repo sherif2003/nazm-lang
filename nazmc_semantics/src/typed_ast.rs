@@ -74,12 +74,14 @@ pub struct Static {
     pub typ: TypeKey,
 }
 
+#[derive(Default)]
 pub struct TupleStruct {
     pub types: ThinVec<FieldInfo>,
     pub size: u32,
     pub align: u8,
 }
 
+#[derive(Default)]
 pub struct FieldsStruct {
     pub fields: HashMap<IdKey, FieldInfo>,
     pub size: u32,

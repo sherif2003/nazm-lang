@@ -225,7 +225,14 @@ fn main() {
 
     let ast = NameResolver::new(&files_infos, &id_pool, &pkgs.map, &pkgs_names, ast).resolve();
 
-    nazmc_semantics::SemanticsAnalyzer::new(&files_infos, &id_pool, &pkgs_names, ast).analyze();
+    nazmc_semantics::SemanticsAnalyzer::new(
+        &files_infos,
+        &files_to_pkgs,
+        &id_pool,
+        &pkgs_names,
+        ast,
+    )
+    .analyze();
 
     // let (file_path, file_content) = cli::read_file();
 
