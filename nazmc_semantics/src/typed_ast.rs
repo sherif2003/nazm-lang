@@ -13,6 +13,7 @@ pub struct TypedAST {
     pub fields_structs: HashMap<FieldsStructKey, FieldsStruct>,
     pub fns: HashMap<FnKey, Fn>,
     pub lets: HashMap<LetStmKey, LetStm>,
+    pub exprs: HashMap<ExprKey, TypeKey>,
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]

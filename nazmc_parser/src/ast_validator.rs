@@ -1361,7 +1361,8 @@ impl<'a> ASTValidator<'a> {
         {
             let first = self.lower_expr(first_item.unwrap());
             if rest_items.is_empty() && trailing_comma.is_none() {
-                self.new_expr(span, nazmc_ast::ExprKind::Parens(first))
+                // Parentheses expression
+                first
             } else {
                 let mut exprs = ThinVec::new();
                 exprs.push(first);
@@ -1371,7 +1372,8 @@ impl<'a> ASTValidator<'a> {
                 self.new_expr(span, nazmc_ast::ExprKind::Tuple(exprs))
             }
         } else {
-            self.new_expr(span, nazmc_ast::ExprKind::Tuple(ThinVec::new()))
+            // Unit Expression
+            self.new_expr(span, nazmc_ast::ExprKind::Unit)
         }
     }
 

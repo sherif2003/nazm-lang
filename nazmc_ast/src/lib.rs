@@ -349,8 +349,8 @@ pub struct Expr {
 
 #[derive(Clone)]
 pub enum ExprKind {
+    Unit,
     Literal(LiteralExpr),
-    Parens(ExprKey),
     PathNoPkg(PathNoPkgKey),
     PathInPkg(PathWithPkgKey),
     Call(Box<CallExpr>),
