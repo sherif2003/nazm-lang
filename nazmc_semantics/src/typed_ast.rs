@@ -21,6 +21,8 @@ pub enum Type {
     #[default]
     Never,
     Unit,
+    UnspecifiedInt,
+    UnspecifiedFloat,
     I,
     I1,
     I2,

@@ -72,6 +72,10 @@ impl<'a> SemanticsAnalyzer<'a> {
             self.analyze_type_expr(type_expr_key);
         }
 
+        for expr_key in self.ast.exprs.keys() {
+            self.analyze_expr(expr_key);
+        }
+
         if !self.diagnostics.is_empty() {
             eprint_diagnostics(self.diagnostics);
             exit(1);

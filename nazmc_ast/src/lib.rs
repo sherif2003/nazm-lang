@@ -341,14 +341,15 @@ pub struct LetStm {
     pub assign: Option<ExprKey>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Expr {
     pub span: Span,
     pub kind: ExprKind,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum ExprKind {
+    #[default]
     Unit,
     Literal(LiteralExpr),
     PathNoPkg(PathNoPkgKey),
