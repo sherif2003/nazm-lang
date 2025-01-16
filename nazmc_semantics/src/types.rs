@@ -62,17 +62,18 @@ impl<'a> SemanticsAnalyzer<'a> {
                         "توجد حلقة لا متناهية في تحديد حجم الهيكل `{}`",
                         self.fmt_item_name(item_info)
                     );
-                    let (err_label, sec_label) = if self.cycle_stack.is_empty() {
-                        ("", "")
+                    let sec_label = format!("لتحديد حجم الهيكل");
+                    let err_label = if self.cycle_stack.is_empty() {
+                        format!("يجب تحديد حجم نفس الهيكل مرة أخرى")
                     } else {
-                        ("", "")
+                        format!("ستنشأ الحلقة عند تحديد حجم هذا النوع")
                     };
 
                     let mut code_window =
                         CodeWindow::new(&self.files_infos[at], type_expr_span.start);
 
-                    code_window.mark_error(type_expr_span, vec![err_label.into()]);
                     code_window.mark_secondary(item_info.id_span, vec![sec_label.into()]);
+                    code_window.mark_error(type_expr_span, vec![err_label]);
 
                     let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
 
@@ -88,12 +89,18 @@ impl<'a> SemanticsAnalyzer<'a> {
                         "توجد حلقة لا متناهية في تحديد حجم الهيكل `{}`",
                         self.fmt_item_name(item_info)
                     );
-                    let label = if self.cycle_stack.is_empty() { "" } else { "" };
+                    let sec_label = format!("لتحديد حجم الهيكل");
+                    let err_label = if self.cycle_stack.is_empty() {
+                        format!("يجب تحديد حجم نفس الهيكل مرة أخرى")
+                    } else {
+                        format!("ستنشأ الحلقة عند تحديد حجم هذا النوع")
+                    };
 
                     let mut code_window =
                         CodeWindow::new(&self.files_infos[at], type_expr_span.start);
-                    code_window.mark_error(type_expr_span, vec![]);
-                    code_window.mark_secondary(item_info.id_span, vec!["في هذا الهيكل".into()]);
+
+                    code_window.mark_secondary(item_info.id_span, vec![sec_label.into()]);
+                    code_window.mark_error(type_expr_span, vec![err_label]);
 
                     let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
 
@@ -114,11 +121,14 @@ impl<'a> SemanticsAnalyzer<'a> {
                     let item_info = self.ast.tuple_structs[tuple_struct_key].info;
 
                     let msg = format!("عند تحديد حجم الهيكل `{}`", self.fmt_item_name(item_info));
+                    let sec_label = format!("لتحديد حجم الهيكل");
+                    let note_label = format!("يجب تحديد حجم هذا النوع");
 
                     let mut code_window =
                         CodeWindow::new(&self.files_infos[at], type_expr_span.start);
-                    code_window.mark_note(type_expr_span, vec![]);
-                    code_window.mark_secondary(item_info.id_span, vec!["في هذا الهيكل".into()]);
+
+                    code_window.mark_secondary(item_info.id_span, vec![sec_label]);
+                    code_window.mark_note(type_expr_span, vec![note_label]);
 
                     let diagnostic = Diagnostic::note(msg, vec![code_window]);
 
@@ -126,12 +136,16 @@ impl<'a> SemanticsAnalyzer<'a> {
                 }
                 CycleDetected::FieldsStruct(fields_struct_key) => {
                     let item_info = self.ast.fields_structs[fields_struct_key].info;
+
                     let msg = format!("عند تحديد حجم الهيكل `{}`", self.fmt_item_name(item_info));
+                    let sec_label = format!("لتحديد حجم الهيكل");
+                    let note_label = format!("يجب تحديد حجم هذا النوع");
 
                     let mut code_window =
                         CodeWindow::new(&self.files_infos[at], type_expr_span.start);
-                    code_window.mark_note(type_expr_span, vec![]);
-                    code_window.mark_secondary(item_info.id_span, vec!["في هذا الهيكل".into()]);
+
+                    code_window.mark_secondary(item_info.id_span, vec![sec_label]);
+                    code_window.mark_note(type_expr_span, vec![note_label]);
 
                     let diagnostic = Diagnostic::note(msg, vec![code_window]);
 
