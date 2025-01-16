@@ -346,6 +346,7 @@ impl<'a> NameResolver<'a> {
             fns: self.ast.fns,
             scopes: self.ast.scopes,
             lets: self.ast.lets,
+            exprs: self.ast.exprs,
         }
     }
 

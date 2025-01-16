@@ -42,6 +42,7 @@ new_data_pool_key! { StaticKey }
 new_data_pool_key! { FnKey }
 new_data_pool_key! { ScopeKey }
 new_data_pool_key! { LetStmKey }
+new_data_pool_key! { ExprKey }
 
 impl LetStmKey {
     pub const FN_PARAMS_STM: Self = Self(0);
@@ -100,6 +101,8 @@ pub struct AST<S> {
     pub scopes: TiVec<ScopeKey, Scope>,
     /// All let stms
     pub lets: TiVec<LetStmKey, LetStm>,
+    /// All expressions
+    pub exprs: TiVec<ExprKey, Expr>,
 }
 
 impl AST<Unresolved> {
@@ -314,7 +317,7 @@ pub struct Fn {
 pub struct Scope {
     pub extra_params: Vec<IdKey>,
     pub stms: ThinVec<Stm>,
-    pub return_expr: Option<Expr>,
+    pub return_expr: Option<ExprKey>,
 }
 
 #[derive(Clone)]
@@ -327,15 +330,15 @@ pub enum ScopeEvent {
 #[derive(Clone)]
 pub enum Stm {
     Let(LetStmKey),
-    While(Box<(Expr, ScopeKey)>),
+    While(ExprKey, ScopeKey),
     If(Box<IfExpr>),
-    Expr(Box<Expr>),
+    Expr(ExprKey),
 }
 
 #[derive(Clone)]
 pub struct LetStm {
     pub binding: Binding,
-    pub assign: Option<Box<Expr>>,
+    pub assign: Option<ExprKey>,
 }
 
 #[derive(Clone)]
@@ -347,7 +350,7 @@ pub struct Expr {
 #[derive(Clone)]
 pub enum ExprKind {
     Literal(LiteralExpr),
-    Parens(Box<Expr>),
+    Parens(ExprKey),
     PathNoPkg(PathNoPkgKey),
     PathInPkg(PathWithPkgKey),
     Call(Box<CallExpr>),
@@ -357,15 +360,15 @@ pub enum ExprKind {
     Field(Box<FieldExpr>),
     Idx(Box<IdxExpr>),
     TupleIdx(Box<TupleIdxExpr>),
-    Tuple(ThinVec<Expr>),
-    ArrayElemnts(ThinVec<Expr>),
+    Tuple(ThinVec<ExprKey>),
+    ArrayElemnts(ThinVec<ExprKey>),
     ArrayElemntsSized(Box<ArrayElementsSizedExpr>),
     If(Box<IfExpr>),
     Lambda(Box<LambdaExpr>),
     UnaryOp(Box<UnaryOpExpr>),
     BinaryOp(Box<BinaryOpExpr>),
-    Return(Option<Box<Expr>>),
-    Break(Option<Box<Expr>>),
+    Return(Option<ExprKey>),
+    Break(Option<ExprKey>),
     Continue,
     On,
 }
@@ -398,53 +401,53 @@ pub enum NumKind {
 
 #[derive(Clone)]
 pub struct CallExpr {
-    pub on: Expr,
-    pub args: ThinVec<Expr>,
+    pub on: ExprKey,
+    pub args: ThinVec<ExprKey>,
     pub parens_span: Span,
 }
 
 #[derive(Clone)]
 pub struct TupleStructExpr {
     pub path_key: TupleStructPathKey,
-    pub args: ThinVec<Expr>,
+    pub args: ThinVec<ExprKey>,
 }
 
 #[derive(Clone)]
 pub struct FieldsStructExpr {
     pub path_key: FieldsStructPathKey,
-    pub fields: ThinVec<(ASTId, Expr)>,
+    pub fields: ThinVec<(ASTId, ExprKey)>,
 }
 
 #[derive(Clone)]
 pub struct FieldExpr {
-    pub on: Expr,
+    pub on: ExprKey,
     pub name: ASTId,
 }
 
 #[derive(Clone)]
 pub struct TupleIdxExpr {
-    pub on: Expr,
+    pub on: ExprKey,
     pub idx: usize,
     pub idx_span: Span,
 }
 
 #[derive(Clone)]
 pub struct IdxExpr {
-    pub on: Expr,
-    pub idx: Expr,
+    pub on: ExprKey,
+    pub idx: ExprKey,
     pub brackets_span: Span,
 }
 
 #[derive(Clone)]
 pub struct ArrayElementsSizedExpr {
-    pub repeat: Expr,
-    pub size: Expr,
+    pub repeat: ExprKey,
+    pub size: ExprKey,
 }
 
 #[derive(Clone)]
 pub struct IfExpr {
-    pub if_: (Expr, ScopeKey),
-    pub else_ifs: ThinVec<(Expr, ScopeKey)>,
+    pub if_: (ExprKey, ScopeKey),
+    pub else_ifs: ThinVec<(ExprKey, ScopeKey)>,
     pub else_: Option<ScopeKey>,
 }
 
@@ -458,7 +461,7 @@ pub struct LambdaExpr {
 pub struct UnaryOpExpr {
     pub op: UnaryOp,
     pub op_span: Span,
-    pub expr: Expr,
+    pub expr: ExprKey,
 }
 
 #[derive(Clone)]
@@ -475,8 +478,8 @@ pub enum UnaryOp {
 pub struct BinaryOpExpr {
     pub op: BinOp,
     pub op_span_cursor: SpanCursor,
-    pub left: Expr,
-    pub right: Expr,
+    pub left: ExprKey,
+    pub right: ExprKey,
 }
 
 #[derive(Clone)]
