@@ -1,15 +1,15 @@
 use std::vec;
 
-use nazmc_ast::{Expr, ExprKey, LiteralExpr};
+use nazmc_ast::{ArrayTypeKey, Expr, ExprKey, LiteralExpr};
 use nazmc_diagnostics::{CodeWindow, Diagnostic};
 
 use crate::{
-    typed_ast::{ArrayType, Type},
+    typed_ast::{ArrayType, Type, TypeKey},
     SemanticsAnalyzer,
 };
 
 impl<'a> SemanticsAnalyzer<'a> {
-    pub(crate) fn analyze_expr(&mut self, expr_key: ExprKey) {
+    pub(crate) fn analyze_expr(&mut self, expr_key: ExprKey) -> Type {
         // Take the ownership (good for vectors as in ExprKind::ArrayElemnts) instead of cloning then restoring it
         let kind = std::mem::take(&mut self.ast.exprs[expr_key].kind);
 
@@ -28,7 +28,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
             kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(
                 nazmc_ast::NumKind::UnspecifiedInt(_),
-            )) => (kind, Type::UnspecifiedInt),
+            )) => (kind, Type::UnspecifiedUnsignedInt),
             kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(
                 nazmc_ast::NumKind::UnspecifiedFloat(_),
             )) => (kind, Type::UnspecifiedFloat),
@@ -72,32 +72,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Char(_)) => (kind, Type::Char),
             kind @ nazmc_ast::ExprKind::Unit => (kind, Type::Unit),
             nazmc_ast::ExprKind::ArrayElemnts(array_elements) => {
-                let size = array_elements.len() as u32;
-
-                let mut underlying_typ = None;
-
-                for expr_key in &array_elements {
-                    self.analyze_expr(*expr_key);
-                    if let Some(underlying_typ) = underlying_typ {
-                        let expr_type_key = *self.typed_ast.exprs.get(&expr_key).unwrap();
-                        if expr_type_key == underlying_typ {
-                            continue;
-                        }
-                        let diagnostic = Diagnostic::error("النوع غير متساوي".into(), vec![]);
-                        self.diagnostics.push(diagnostic);
-                        break;
-                    } else {
-                        underlying_typ = Some(*self.typed_ast.exprs.get(&expr_key).unwrap())
-                    }
-                }
-
-                let underlying_typ = underlying_typ.unwrap_or(self.types_pool.get_key(&Type::Unit));
-
-                let array_type_key = self.array_types_pool.get_key(&ArrayType {
-                    underlying_typ,
-                    size,
-                });
-
+                let array_type_key = self.analyze_array_elements(&array_elements);
                 (
                     nazmc_ast::ExprKind::ArrayElemnts(array_elements),
                     Type::Array(array_type_key),
@@ -127,9 +102,39 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.typed_ast
             .exprs
             .insert(expr_key, self.types_pool.get_key(&typ));
+
+        typ
     }
 
-    fn analyze_array_elements(&mut self, array_elements: &[ExprKey]) -> Type {
-        todo!()
+    fn analyze_array_elements(&mut self, array_elements: &[ExprKey]) -> ArrayTypeKey {
+        let size = array_elements.len() as u32;
+
+        let first_expr_span = array_elements
+            .first()
+            .map(|expr_key| self.ast.exprs[*expr_key].span);
+
+        let mut underlying_typ = Type::Unknown;
+
+        for expr_key in array_elements {
+            let expr_typ = self.analyze_expr(*expr_key);
+            if self.is_subtype_of(underlying_typ, expr_typ) {
+                underlying_typ = expr_typ;
+                continue;
+            } else {
+                let first_expr_span = first_expr_span.unwrap();
+                let expr_span = self.ast.exprs[*expr_key].span;
+
+                let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![]);
+                self.diagnostics.push(diagnostic);
+                break;
+            }
+        }
+
+        let underlying_typ = self.types_pool.get_key(&underlying_typ);
+
+        self.array_types_pool.get_key(&ArrayType {
+            underlying_typ,
+            size,
+        })
     }
 }

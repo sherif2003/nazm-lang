@@ -4,6 +4,7 @@ use crate::*;
 use derive_more::{From, Into};
 use nazmc_data_pool::new_data_pool_key;
 new_data_pool_key! { TypeKey }
+new_data_pool_key! { FnPtrTypeKey }
 
 #[derive(Default)]
 pub struct TypedAST {
@@ -11,17 +12,18 @@ pub struct TypedAST {
     pub statics: HashMap<StaticKey, Static>,
     pub tuple_structs: HashMap<TupleStructKey, TupleStruct>,
     pub fields_structs: HashMap<FieldsStructKey, FieldsStruct>,
-    pub fns: HashMap<FnKey, Fn>,
+    pub fns_signatures: HashMap<FnKey, FnPtrTypeKey>,
     pub lets: HashMap<LetStmKey, LetStm>,
     pub exprs: HashMap<ExprKey, TypeKey>,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Type {
-    #[default]
+    Unknown,
     Never,
     Unit,
-    UnspecifiedInt,
+    UnspecifiedUnsignedInt,
+    UnspecifiedSignedInt,
     UnspecifiedFloat,
     I,
     I1,
@@ -49,6 +51,7 @@ pub enum Type {
     Tuple(TupleTypeKey),
     Array(ArrayTypeKey),
     Lambda(LambdaTypeKey),
+    FnPtr(FnPtrTypeKey),
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -66,6 +69,12 @@ pub struct ArrayType {
 pub struct LambdaType {
     pub params_types: ThinVec<TypeKey>,
     pub return_type: TypeKey,
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+pub struct FnPtrType {
+    pub params: ThinVec<TypeKey>,
+    pub return_typ: TypeKey,
 }
 
 pub struct Const {
@@ -95,11 +104,6 @@ pub struct FieldsStruct {
 pub struct FieldInfo {
     pub offset: u32,
     pub typ: TypeKey,
-}
-
-pub struct Fn {
-    pub params: ThinVec<TypeKey>,
-    pub return_typ: TypeKey,
 }
 
 pub struct LetStm {

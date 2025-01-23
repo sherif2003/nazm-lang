@@ -14,7 +14,9 @@ use nazmc_diagnostics::{
 };
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
-use typed_ast::{ArrayType, LambdaType, TupleType, Type, TypeKey, TypedAST};
+use typed_ast::{
+    ArrayType, FnPtrType, FnPtrTypeKey, LambdaType, TupleType, Type, TypeKey, TypedAST,
+};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum CycleDetected {
@@ -44,6 +46,7 @@ pub struct SemanticsAnalyzer<'a> {
     tuple_types_pool: DataPoolBuilder<TupleTypeKey, TupleType>,
     array_types_pool: DataPoolBuilder<ArrayTypeKey, ArrayType>,
     lambda_types_pool: DataPoolBuilder<LambdaTypeKey, LambdaType>,
+    fns_ptrs_types_pool: DataPoolBuilder<FnPtrTypeKey, FnPtrType>,
     semantics_stack: SemanticsStack,
     diagnostics: Vec<Diagnostic<'a>>,
     cycle_stack: Vec<Diagnostic<'a>>,
@@ -62,6 +65,15 @@ impl<'a> SemanticsAnalyzer<'a> {
             files_to_pkgs,
             id_pool,
             pkgs_names,
+            typed_ast: TypedAST {
+                consts: HashMap::with_capacity(ast.consts.len()),
+                statics: HashMap::with_capacity(ast.statics.len()),
+                tuple_structs: HashMap::with_capacity(ast.tuple_structs.len()),
+                fields_structs: HashMap::with_capacity(ast.fields_structs.len()),
+                fns_signatures: HashMap::with_capacity(ast.fns.len()),
+                lets: HashMap::with_capacity(ast.lets.len()),
+                exprs: HashMap::with_capacity(ast.exprs.len()),
+            },
             ast,
             ..Default::default()
         }
@@ -99,6 +111,48 @@ impl<'a> SemanticsAnalyzer<'a> {
             name.to_owned()
         } else {
             format!("{}::{}", pkg, name)
+        }
+    }
+
+    fn is_subtype_of(&self, sub: Type, sup: Type) -> bool {
+        match (sub, sup) {
+            (Type::Unknown | Type::Never, _)
+            | (
+                Type::UnspecifiedUnsignedInt,
+                Type::UnspecifiedSignedInt
+                | Type::I
+                | Type::I1
+                | Type::I2
+                | Type::I4
+                | Type::I8
+                | Type::UnspecifiedUnsignedInt
+                | Type::U
+                | Type::U1
+                | Type::U2
+                | Type::U4
+                | Type::U8,
+            )
+            | (
+                Type::UnspecifiedSignedInt,
+                Type::UnspecifiedSignedInt | Type::I | Type::I1 | Type::I2 | Type::I4 | Type::I8,
+            )
+            | (Type::UnspecifiedFloat, Type::UnspecifiedFloat | Type::F4 | Type::F8)
+            | (Type::I, Type::I)
+            | (Type::I1, Type::I1)
+            | (Type::I2, Type::I2)
+            | (Type::I4, Type::I4)
+            | (Type::I8, Type::I8)
+            | (Type::U, Type::U)
+            | (Type::U1, Type::U1)
+            | (Type::U2, Type::U2)
+            | (Type::U4, Type::U4)
+            | (Type::U8, Type::U8)
+            | (Type::F4, Type::F4)
+            | (Type::F8, Type::F8) => true,
+            (Type::UnitStruct(key1), Type::UnitStruct(key2)) if key1 == key2 => true,
+            (Type::TupleStruct(key1), Type::TupleStruct(key2)) if key1 == key2 => true,
+            (Type::FieldsStruct(key1), Type::FieldsStruct(key2)) if key1 == key2 => true,
+            _ => false,
         }
     }
 }
