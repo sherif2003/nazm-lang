@@ -88,7 +88,6 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         let fns = std::mem::take(&mut self.ast.fns);
 
-        println!("Fns Len: {}", fns.len());
         for _fn in fns {
             self.current_file_key = _fn.info.file_key;
             self.analyze_scope(_fn.scope_key);
@@ -120,18 +119,17 @@ impl<'a> SemanticsAnalyzer<'a> {
     fn analyze_scope(&mut self, scope_key: ScopeKey) {
         let stms = &self.ast.scopes[scope_key].stms.clone(); // TODO: Remove the clone
 
-        println!("Stms Len: {}", stms.len());
         for stm in stms {
             match stm {
                 Stm::Let(let_stm_key) => {
+                    let has_type = self.ast.lets[*let_stm_key].binding.typ.is_some();
+
                     let let_stm_type = self.ast.lets[*let_stm_key]
                         .binding
                         .typ
                         .map_or(Ty::new(Type::Unknown), |type_expr_key| {
                             self.analyze_type_expr(type_expr_key).0
                         });
-
-                    println!("{:?}", let_stm_type);
 
                     if let Some(expr_key) = self.ast.lets[*let_stm_key].assign {
                         self.infer_expr(&let_stm_type, expr_key);

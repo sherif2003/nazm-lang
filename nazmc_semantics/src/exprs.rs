@@ -2,9 +2,10 @@ use std::vec;
 
 use nazmc_ast::{ExprKey, LiteralExpr};
 use nazmc_diagnostics::{span::Span, Diagnostic};
+use thin_vec::ThinVec;
 
 use crate::{
-    typed_ast::{ArrayType, Ty, Type},
+    typed_ast::{ArrayType, FieldInfo, TupleType, Ty, Type},
     SemanticsAnalyzer,
 };
 
@@ -32,7 +33,10 @@ impl<'a> SemanticsAnalyzer<'a> {
             nazmc_ast::ExprKind::Field(field_expr) => todo!(),
             nazmc_ast::ExprKind::Idx(idx_expr) => todo!(),
             nazmc_ast::ExprKind::TupleIdx(tuple_idx_expr) => todo!(),
-            nazmc_ast::ExprKind::Tuple(thin_vec) => todo!(),
+            nazmc_ast::ExprKind::Tuple(exprs) => {
+                self.infer_tuple_expr(expected_ty, &exprs, expr_span);
+                nazmc_ast::ExprKind::Tuple(exprs)
+            }
             nazmc_ast::ExprKind::ArrayElemnts(thin_vec) => todo!(),
             nazmc_ast::ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
             nazmc_ast::ExprKind::If(if_expr) => todo!(),
@@ -185,6 +189,43 @@ impl<'a> SemanticsAnalyzer<'a> {
                 ),
             },
         }
+    }
+
+    fn infer_tuple_expr(&mut self, expected_ty: &Ty, exprs: &[ExprKey], expr_span: Span) {
+        let inner = expected_ty.inner();
+        if let Type::Tuple(TupleType { types }) = inner {
+            if types.len() == exprs.len() {
+                for i in 0..exprs.len() {
+                    let expr_key = exprs[i];
+                    self.infer_expr(&types[i].typ, expr_key);
+                }
+            } else {
+                let found_ty = self.infer_tuple_expr_with_unknown(exprs);
+                self.add_type_mismatch_err(expected_ty, &found_ty, expr_span);
+            }
+        } else {
+            let tuple_ty = self.infer_tuple_expr_with_unknown(exprs);
+            self.unify(
+                expected_ty,
+                &[tuple_ty.inner()],
+                &[Type::Unknown],
+                expr_span,
+            );
+        }
+    }
+
+    fn infer_tuple_expr_with_unknown(&mut self, exprs: &[ExprKey]) -> Ty {
+        let mut tuple_types = ThinVec::with_capacity(exprs.len());
+
+        for i in 0..exprs.len() {
+            let expr_key = exprs[i];
+            tuple_types.push(FieldInfo {
+                offset: 0,
+                typ: Ty::new(Type::Unknown),
+            });
+            self.infer_expr(&tuple_types[i].typ, expr_key);
+        }
+        Ty::new(Type::Tuple(TupleType { types: tuple_types }))
     }
 
     fn unify(

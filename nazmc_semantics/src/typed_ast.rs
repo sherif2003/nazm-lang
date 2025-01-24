@@ -135,10 +135,5 @@ pub struct FieldInfo {
 }
 
 pub struct LetStm {
-    pub bindings: HashMap<IdKey, Binding>,
-}
-
-pub struct Binding {
-    pub typ: Ty,
-    pub tuple_indexes: ThinVec<u8>,
+    pub bindings: HashMap<IdKey, Ty>,
 }
