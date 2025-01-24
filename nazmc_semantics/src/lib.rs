@@ -14,7 +14,7 @@ use nazmc_diagnostics::{
 };
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
-use typed_ast::{ArrayType, FnPtrType, LambdaType, TupleType, Ty, Type, TypedAST};
+use typed_ast::{ArrayType, FnPtrType, LambdaType, LetStm, TupleType, Ty, Type, TypedAST};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum CycleDetected {
@@ -122,8 +122,6 @@ impl<'a> SemanticsAnalyzer<'a> {
         for stm in stms {
             match stm {
                 Stm::Let(let_stm_key) => {
-                    let has_type = self.ast.lets[*let_stm_key].binding.typ.is_some();
-
                     let let_stm_type = self.ast.lets[*let_stm_key]
                         .binding
                         .typ
@@ -135,6 +133,19 @@ impl<'a> SemanticsAnalyzer<'a> {
                         self.infer_expr(&let_stm_type, expr_key);
                     }
 
+                    self.typed_ast.lets.insert(
+                        *let_stm_key,
+                        LetStm {
+                            bindings: HashMap::new(),
+                        },
+                    );
+
+                    self.set_bindnig_ty(
+                        *let_stm_key,
+                        self.ast.lets[*let_stm_key].binding.kind.clone(),
+                        &let_stm_type,
+                    );
+
                     // self.typed_ast
                     //     .lets
                     //     .insert(*let_stm_key, let_stm_type.clone());
@@ -144,6 +155,90 @@ impl<'a> SemanticsAnalyzer<'a> {
                 Stm::Expr(expr_key) => self.infer_expr(&Ty::new(Type::Unknown), *expr_key),
             }
         }
+    }
+
+    fn set_bindnig_ty(&mut self, let_stm_key: LetStmKey, kind: BindingKind, ty: &Ty) {
+        match kind {
+            BindingKind::Id(id) => {
+                self.typed_ast
+                    .lets
+                    .get_mut(&let_stm_key)
+                    .unwrap()
+                    .bindings
+                    .insert(id.id, ty.clone());
+            }
+            BindingKind::MutId { id, .. } => {
+                self.typed_ast
+                    .lets
+                    .get_mut(&let_stm_key)
+                    .unwrap()
+                    .bindings
+                    .insert(id.id, ty.clone());
+            }
+            BindingKind::Tuple(kinds, span) => {
+                if let Type::Tuple(TupleType { types }) = ty.inner() {
+                    if kinds.len() == types.len() {
+                        for i in 0..kinds.len() {
+                            let kind = &kinds[i];
+                            let ty = &types[i];
+                            self.set_bindnig_ty(let_stm_key, kind.clone(), ty);
+                        }
+                    } else {
+                        let found_ty =
+                            self.destructed_tuple_to_ty_with_unknown(let_stm_key, &kinds);
+                        self.add_type_mismatch_err(ty, &found_ty, span);
+                    }
+                } else {
+                    let found_ty = self.destructed_tuple_to_ty_with_unknown(let_stm_key, &kinds);
+                    self.unify(ty, &[found_ty.inner()], &[Type::Unknown], span);
+                }
+            }
+        }
+    }
+
+    fn destructed_tuple_to_ty_with_unknown(
+        &mut self,
+        let_stm_key: LetStmKey,
+        kinds: &[BindingKind],
+    ) -> Ty {
+        let mut tuple_types = ThinVec::with_capacity(kinds.len());
+        for i in 0..kinds.len() {
+            let kind = &kinds[i];
+            let ty = Ty::new(Type::Unknown);
+            self.set_bindnig_ty(let_stm_key, kind.clone(), &ty);
+            tuple_types.push(ty);
+        }
+        Ty::new(Type::Tuple(TupleType { types: tuple_types }))
+    }
+
+    fn unify(
+        &mut self,
+        expected_ty: &Ty,
+        possible_sup_types: &[Type],
+        possible_sub_types: &[Type],
+        span: Span,
+    ) {
+        if !unify(expected_ty, possible_sup_types, possible_sub_types) {
+            self.add_type_mismatch_err(
+                expected_ty,
+                &Ty::new(possible_sup_types[possible_sup_types.len() - 1].clone()),
+                span,
+            );
+        }
+    }
+
+    fn add_type_mismatch_err(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
+        let mut code_window = CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
+        code_window.mark_error(
+            span,
+            vec![format!(
+                "يُتوقّع النوع `{}` ولكن تم العثور على النوع `{}`",
+                self.fmt_type(expected_ty),
+                self.fmt_type(found_ty)
+            )],
+        );
+        let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![code_window]);
+        self.diagnostics.push(diagnostic);
     }
 
     fn fmt_pkg_name(&self, pkg_key: PkgKey) -> String {
@@ -166,7 +261,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     fn fmt_type(&self, ty: &Ty) -> String {
         match ty.inner() {
-            Type::Unknown => format!("{{غير معروف}}"),
+            Type::Unknown => format!("_"),
             Type::Never => format!("!!"),
             Type::Unit => format!("()"),
             Type::UnspecifiedUnsignedInt => format!("{{عدد}}"),
@@ -215,7 +310,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     tuple_type
                         .types
                         .into_iter()
-                        .map(|field_info| self.fmt_type(&field_info.typ))
+                        .map(|ty| self.fmt_type(&ty))
                         .collect::<Vec<_>>()
                         .join("، ")
                 )
@@ -241,20 +336,6 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.fmt_type(&fn_ptr_type.return_typ)
             ),
         }
-    }
-
-    fn add_type_mismatch_err(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
-        let mut code_window = CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
-        code_window.mark_error(
-            span,
-            vec![format!(
-                "يُتوقّع النوع `{}` ولكن تم العثور على النوع `{}`",
-                self.fmt_type(expected_ty),
-                self.fmt_type(found_ty)
-            )],
-        );
-        let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![code_window]);
-        self.diagnostics.push(diagnostic);
     }
 
     fn is_subtype_of(&self, sub: &Ty, sup: &Ty) -> bool {
@@ -317,7 +398,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 .types
                 .into_iter()
                 .zip(sup.types)
-                .all(|(sub, sup)| self.is_subtype_of(&sub.typ, &sup.typ)),
+                .all(|(sub, sup)| self.is_subtype_of(&sub, &sup)),
             (Type::Lambda(sub), Type::Lambda(sup)) => {
                 sub.params_types
                     .into_iter()
@@ -334,5 +415,37 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
             _ => false,
         }
+    }
+}
+
+fn unify(expected_ty: &Ty, possible_sup_types: &[Type], possible_sub_types: &[Type]) -> bool {
+    let expected_type = expected_ty.inner();
+
+    for possible_sub_ty in possible_sub_types {
+        if expected_type == *possible_sub_ty {
+            *expected_ty.borrow_mut() = possible_sup_types[possible_sup_types.len() - 1].clone();
+            return true;
+        }
+    }
+
+    for possible_sup_ty in possible_sup_types {
+        if expected_type == *possible_sup_ty {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[cfg(test)]
+mod tests {
+
+    use crate::*;
+
+    #[test]
+    fn test_unifying() {
+        let unknown = Ty::new(Type::Unknown);
+        unify(&unknown, &[Type::Unit], &[Type::Unknown]);
+        assert!(matches!(unknown.inner(), Type::Unit));
     }
 }

@@ -420,7 +420,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 offset = aligned_offset;
             }
 
-            types.push(typed_ast::FieldInfo { offset, typ });
+            types.push(typ);
             offset += size as u32;
         }
 

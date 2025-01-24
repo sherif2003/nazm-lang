@@ -197,7 +197,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             if types.len() == exprs.len() {
                 for i in 0..exprs.len() {
                     let expr_key = exprs[i];
-                    self.infer_expr(&types[i].typ, expr_key);
+                    self.infer_expr(&types[i], expr_key);
                 }
             } else {
                 let found_ty = self.infer_tuple_expr_with_unknown(exprs);
@@ -219,29 +219,10 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         for i in 0..exprs.len() {
             let expr_key = exprs[i];
-            tuple_types.push(FieldInfo {
-                offset: 0,
-                typ: Ty::new(Type::Unknown),
-            });
-            self.infer_expr(&tuple_types[i].typ, expr_key);
+            tuple_types.push(Ty::new(Type::Unknown));
+            self.infer_expr(&tuple_types[i], expr_key);
         }
         Ty::new(Type::Tuple(TupleType { types: tuple_types }))
-    }
-
-    fn unify(
-        &mut self,
-        expected_ty: &Ty,
-        possible_sup_types: &[Type],
-        possible_sub_types: &[Type],
-        span: Span,
-    ) {
-        if !unify(expected_ty, possible_sup_types, possible_sub_types) {
-            self.add_type_mismatch_err(
-                expected_ty,
-                &Ty::new(possible_sup_types[possible_sup_types.len() - 1].clone()),
-                span,
-            );
-        }
     }
 
     pub(crate) fn analyze_expr(&mut self, expr_key: ExprKey) -> Ty {
@@ -365,41 +346,5 @@ impl<'a> SemanticsAnalyzer<'a> {
             underlying_typ,
             size,
         }
-    }
-}
-
-fn unify(expected_ty: &Ty, possible_sup_types: &[Type], possible_sub_types: &[Type]) -> bool {
-    let expected_type = expected_ty.inner();
-
-    for possible_sub_ty in possible_sub_types {
-        if expected_type == *possible_sub_ty {
-            *expected_ty.borrow_mut() = possible_sup_types[possible_sup_types.len() - 1].clone();
-            return true;
-        }
-    }
-
-    for possible_sup_ty in possible_sup_types {
-        if expected_type == *possible_sup_ty {
-            return true;
-        }
-    }
-
-    false
-}
-#[cfg(test)]
-mod tests {
-
-    use crate::*;
-
-    #[test]
-    fn test_unifying() {
-        let unknown = Ty::new(Type::Unknown);
-        unify(
-            &unknown,
-            &[Type::Unit],
-            &[Type::Unknown],
-            Default::default(),
-        );
-        assert!(matches!(unknown.inner(), Type::Unit));
     }
 }

@@ -84,7 +84,7 @@ pub enum Type {
 
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct TupleType {
-    pub types: ThinVec<FieldInfo>,
+    pub types: ThinVec<Ty>,
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
