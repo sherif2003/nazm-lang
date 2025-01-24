@@ -1,10 +1,37 @@
-use std::default;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::*;
-use derive_more::{From, Into};
-use nazmc_data_pool::new_data_pool_key;
-new_data_pool_key! { TypeKey }
-new_data_pool_key! { FnPtrTypeKey }
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct RcCell<T: Clone> {
+    data: Rc<RefCell<T>>,
+}
+
+impl<T: Clone> RcCell<T> {
+    #[inline]
+    pub fn new(data: T) -> Self {
+        Self {
+            data: Rc::new(RefCell::new(data)),
+        }
+    }
+
+    #[inline]
+    pub fn borrow(&self) -> std::cell::Ref<T> {
+        self.data.borrow()
+    }
+
+    #[inline]
+    pub fn borrow_mut(&self) -> std::cell::RefMut<T> {
+        self.data.borrow_mut()
+    }
+
+    #[inline]
+    pub fn inner(&self) -> T {
+        self.borrow().clone()
+    }
+}
+
+pub type Ty = RcCell<Type>;
 
 #[derive(Default)]
 pub struct TypedAST {
@@ -12,13 +39,14 @@ pub struct TypedAST {
     pub statics: HashMap<StaticKey, Static>,
     pub tuple_structs: HashMap<TupleStructKey, TupleStruct>,
     pub fields_structs: HashMap<FieldsStructKey, FieldsStruct>,
-    pub fns_signatures: HashMap<FnKey, FnPtrTypeKey>,
+    pub fns_signatures: HashMap<FnKey, FnPtrType>,
     pub lets: HashMap<LetStmKey, LetStm>,
-    pub exprs: HashMap<ExprKey, TypeKey>,
+    pub exprs: HashMap<ExprKey, Ty>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub enum Type {
+    #[default]
     Unknown,
     Never,
     Unit,
@@ -43,47 +71,47 @@ pub enum Type {
     UnitStruct(UnitStructKey),
     TupleStruct(TupleStructKey),
     FieldsStruct(FieldsStructKey),
-    Slice(TypeKey),
-    Ptr(TypeKey),
-    Ref(TypeKey),
-    PtrMut(TypeKey),
-    RefMut(TypeKey),
-    Tuple(TupleTypeKey),
-    Array(ArrayTypeKey),
-    Lambda(LambdaTypeKey),
-    FnPtr(FnPtrTypeKey),
+    Slice(Ty),
+    Ptr(Ty),
+    Ref(Ty),
+    PtrMut(Ty),
+    RefMut(Ty),
+    Array(ArrayType),
+    Tuple(TupleType),
+    Lambda(LambdaType),
+    FnPtr(FnPtrType),
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct TupleType {
     pub types: ThinVec<FieldInfo>,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct ArrayType {
-    pub underlying_typ: TypeKey,
+    pub underlying_typ: Ty,
     pub size: u32,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct LambdaType {
-    pub params_types: ThinVec<TypeKey>,
-    pub return_type: TypeKey,
+    pub params_types: ThinVec<Ty>,
+    pub return_type: Ty,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct FnPtrType {
-    pub params: ThinVec<TypeKey>,
-    pub return_typ: TypeKey,
+    pub params: ThinVec<Ty>,
+    pub return_typ: Ty,
 }
 
 pub struct Const {
-    pub typ: TypeKey,
+    pub typ: Ty,
     pub value: Vec<u8>,
 }
 
 pub struct Static {
-    pub typ: TypeKey,
+    pub typ: Ty,
 }
 
 #[derive(Default)]
@@ -100,10 +128,10 @@ pub struct FieldsStruct {
     pub align: u8,
 }
 
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Default, Debug, PartialEq)]
 pub struct FieldInfo {
     pub offset: u32,
-    pub typ: TypeKey,
+    pub typ: Ty,
 }
 
 pub struct LetStm {
@@ -111,6 +139,6 @@ pub struct LetStm {
 }
 
 pub struct Binding {
-    pub typ: TypeKey,
+    pub typ: Ty,
     pub tuple_indexes: ThinVec<u8>,
 }

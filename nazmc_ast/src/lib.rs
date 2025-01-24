@@ -34,9 +34,6 @@ new_data_pool_key! { FileKey }
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
 new_data_pool_key! { FieldsStructKey }
-new_data_pool_key! { TupleTypeKey }
-new_data_pool_key! { ArrayTypeKey }
-new_data_pool_key! { LambdaTypeKey }
 new_data_pool_key! { ConstKey }
 new_data_pool_key! { StaticKey }
 new_data_pool_key! { FnKey }
