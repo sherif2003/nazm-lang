@@ -186,7 +186,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     }
                 } else {
                     let found_ty = self.destructed_tuple_to_ty_with_unknown(let_stm_key, &kinds);
-                    self.unify(ty, &[found_ty.inner()], &[Type::Unknown], span);
+                    self.unify(ty, &found_ty, span);
                 }
             }
         }
@@ -207,19 +207,12 @@ impl<'a> SemanticsAnalyzer<'a> {
         Ty::new(Type::Tuple(TupleType { types: tuple_types }))
     }
 
-    fn unify(
-        &mut self,
-        expected_ty: &Ty,
-        possible_sup_types: &[Type],
-        possible_sub_types: &[Type],
-        span: Span,
-    ) {
-        if !unify(expected_ty, possible_sup_types, possible_sub_types) {
-            self.add_type_mismatch_err(
-                expected_ty,
-                &Ty::new(possible_sup_types[possible_sup_types.len() - 1].clone()),
-                span,
-            );
+    fn unify(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
+        if let Some(sup_type) = self.get_super_type(&expected_ty, &found_ty) {
+            *expected_ty.borrow_mut() = sup_type.inner();
+            *found_ty.borrow_mut() = sup_type.inner();
+        } else {
+            self.add_type_mismatch_err(expected_ty, &found_ty, span);
         }
     }
 
@@ -335,17 +328,18 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     fn get_super_type(&self, t1: &Ty, t2: &Ty) -> Option<Ty> {
-        if self.is_subtype_of(&t1.borrow(), &t2.borrow()) {
+        if self.is_subtype_of(t1, t2) {
             Some(t2.clone())
-        } else if self.is_subtype_of(&t2.borrow(), &t1.borrow()) {
+        } else if self.is_subtype_of(t2, t1) {
             Some(t1.clone())
         } else {
             None
         }
     }
 
-    fn is_subtype_of(&self, sub: &Type, sup: &Type) -> bool {
-        match (sub, sup) {
+    fn is_subtype_of(&self, sub: &Ty, sup: &Ty) -> bool {
+        match (&*sub.borrow(), &*sup.borrow()) {
+            (Type::Never, ty2) if !matches!(ty2, Type::Unknown) => true,
             (Type::Unknown, _)
             | (
                 Type::UnspecifiedUnsignedInt,
@@ -377,7 +371,9 @@ impl<'a> SemanticsAnalyzer<'a> {
             | (Type::U8, Type::U8)
             | (Type::F4, Type::F4)
             | (Type::F8, Type::F8)
-            | (Type::Never, _) => true,
+            | (Type::Bool, Type::Bool)
+            | (Type::Char, Type::Char)
+            | (Type::Str, Type::Str) => true,
             (Type::UnitStruct(key1), Type::UnitStruct(key2)) if key1 == key2 => true,
             (Type::TupleStruct(key1), Type::TupleStruct(key2)) if key1 == key2 => true,
             (Type::FieldsStruct(key1), Type::FieldsStruct(key2)) if key1 == key2 => true,
@@ -392,7 +388,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     size: _,
                 }),
                 Type::Slice(sup),
-            ) => self.is_subtype_of(&sub.borrow(), &sup.borrow()),
+            ) => self.is_subtype_of(&sub, &sup),
             (
                 Type::Array(ArrayType {
                     underlying_typ: sub,
@@ -402,61 +398,29 @@ impl<'a> SemanticsAnalyzer<'a> {
                     underlying_typ: sup,
                     size: sup_size,
                 }),
-            ) if sub_size == sup_size => self.is_subtype_of(&sub.borrow(), &sup.borrow()),
+            ) if sub_size == sup_size => self.is_subtype_of(&sub, &sup),
             (Type::Tuple(sub), Type::Tuple(sup)) if sub.types.len() == sup.types.len() => sub
                 .types
                 .iter()
                 .zip(&sup.types)
-                .all(|(sub, sup)| self.is_subtype_of(&sub.borrow(), &sup.borrow())),
+                .all(|(sub, sup)| self.is_subtype_of(&sub, &sup)),
             (Type::Lambda(sub), Type::Lambda(sup))
                 if sub.params_types.len() == sup.params_types.len() =>
             {
                 sub.params_types
                     .iter()
                     .zip(&sup.params_types)
-                    .all(|(sub, sup)| self.is_subtype_of(&sup.borrow(), &sub.borrow()))
-                    && self.is_subtype_of(&sub.return_type.borrow(), &sup.return_type.borrow())
+                    .all(|(sub, sup)| self.is_subtype_of(&sup, &sub))
+                    && self.is_subtype_of(&sub.return_type, &sup.return_type)
             }
             (Type::FnPtr(sub), Type::FnPtr(sup)) if sub.params.len() == sup.params.len() => {
                 sub.params
                     .iter()
                     .zip(&sup.params)
-                    .all(|(sub, sup)| self.is_subtype_of(&sup.borrow(), &sub.borrow()))
-                    && self.is_subtype_of(&sub.return_typ.borrow(), &sup.return_typ.borrow())
+                    .all(|(sub, sup)| self.is_subtype_of(&sup, &sub))
+                    && self.is_subtype_of(&sub.return_typ, &sup.return_typ)
             }
             _ => false,
         }
-    }
-}
-
-fn unify(expected_ty: &Ty, possible_sup_types: &[Type], possible_sub_types: &[Type]) -> bool {
-    let expected_type = expected_ty.inner();
-
-    for possible_sub_ty in possible_sub_types {
-        if expected_type == *possible_sub_ty {
-            *expected_ty.borrow_mut() = possible_sup_types[possible_sup_types.len() - 1].clone();
-            return true;
-        }
-    }
-
-    for possible_sup_ty in possible_sup_types {
-        if expected_type == *possible_sup_ty {
-            return true;
-        }
-    }
-
-    false
-}
-
-#[cfg(test)]
-mod tests {
-
-    use crate::*;
-
-    #[test]
-    fn test_unifying() {
-        let unknown = Ty::new(Type::Unknown);
-        unify(&unknown, &[Type::Unit], &[Type::Unknown]);
-        assert!(matches!(unknown.inner(), Type::Unit));
     }
 }

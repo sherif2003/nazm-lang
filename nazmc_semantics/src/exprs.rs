@@ -17,14 +17,38 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         let kind = match kind {
             nazmc_ast::ExprKind::Unit => {
-                self.unify(expected_ty, &[Type::Unit], &[Type::Unknown], expr_span);
+                let found_ty = Ty::new(Type::Unit);
+                self.unify(expected_ty, &found_ty, expr_span);
                 nazmc_ast::ExprKind::Unit
             }
             nazmc_ast::ExprKind::Literal(lit_expr) => {
                 self.infer_lit_expr(expected_ty, &lit_expr, expr_span);
                 nazmc_ast::ExprKind::Literal(lit_expr)
             }
-            nazmc_ast::ExprKind::PathNoPkg(path_no_pkg_key) => todo!(),
+            nazmc_ast::ExprKind::PathNoPkg(path_no_pkg_key) => {
+                let item = self.ast.state.paths_no_pkgs_exprs[path_no_pkg_key];
+
+                match item {
+                    nazmc_ast::Item::Const { vis, key } => todo!(),
+                    nazmc_ast::Item::Static { vis, key } => todo!(),
+                    nazmc_ast::Item::Fn { vis, key } => todo!(),
+                    nazmc_ast::Item::LocalVar { id, key } => {
+                        let found_ty = self
+                            .typed_ast
+                            .lets
+                            .get(&key)
+                            .unwrap()
+                            .bindings
+                            .get(&id)
+                            .unwrap()
+                            .clone();
+                        self.unify(expected_ty, &found_ty, expr_span);
+                    }
+                    _ => unreachable!(),
+                }
+
+                nazmc_ast::ExprKind::PathNoPkg(path_no_pkg_key)
+            }
             nazmc_ast::ExprKind::PathInPkg(path_with_pkg_key) => todo!(),
             nazmc_ast::ExprKind::Call(call_expr) => todo!(),
             nazmc_ast::ExprKind::UnitStruct(unit_struct_path_key) => todo!(),
@@ -56,139 +80,29 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     fn infer_lit_expr(&mut self, expected_ty: &Ty, lit_expr: &LiteralExpr, expr_span: Span) {
-        match lit_expr {
-            LiteralExpr::Str(_) => self.unify(
-                expected_ty,
-                &[Type::Ref(Ty::new(Type::Str))],
-                &[Type::Unknown],
-                expr_span,
-            ),
-            LiteralExpr::Char(_) => {
-                self.unify(expected_ty, &[Type::Char], &[Type::Unknown], expr_span)
-            }
-            LiteralExpr::Bool(_) => {
-                self.unify(expected_ty, &[Type::Bool], &[Type::Unknown], expr_span)
-            }
+        let found_ty = Ty::new(match lit_expr {
+            LiteralExpr::Str(_) => Type::Ref(Ty::new(Type::Str)),
+            LiteralExpr::Char(_) => Type::Char,
+            LiteralExpr::Bool(_) => Type::Bool,
             LiteralExpr::Num(num_kind) => match num_kind {
-                nazmc_ast::NumKind::F4(_) => self.unify(
-                    expected_ty,
-                    &[Type::F4],
-                    &[Type::Unknown, Type::UnspecifiedFloat],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::F8(_) => self.unify(
-                    expected_ty,
-                    &[Type::F8],
-                    &[Type::Unknown, Type::UnspecifiedFloat],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::I(_) => self.unify(
-                    expected_ty,
-                    &[Type::I],
-                    &[
-                        Type::Unknown,
-                        Type::UnspecifiedUnsignedInt,
-                        Type::UnspecifiedSignedInt,
-                    ],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::I1(_) => self.unify(
-                    expected_ty,
-                    &[Type::I1],
-                    &[
-                        Type::Unknown,
-                        Type::UnspecifiedUnsignedInt,
-                        Type::UnspecifiedSignedInt,
-                    ],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::I2(_) => self.unify(
-                    expected_ty,
-                    &[Type::I2],
-                    &[
-                        Type::Unknown,
-                        Type::UnspecifiedUnsignedInt,
-                        Type::UnspecifiedSignedInt,
-                    ],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::I4(_) => self.unify(
-                    expected_ty,
-                    &[Type::I4],
-                    &[
-                        Type::Unknown,
-                        Type::UnspecifiedUnsignedInt,
-                        Type::UnspecifiedSignedInt,
-                    ],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::I8(_) => self.unify(
-                    expected_ty,
-                    &[Type::I8],
-                    &[
-                        Type::Unknown,
-                        Type::UnspecifiedUnsignedInt,
-                        Type::UnspecifiedSignedInt,
-                    ],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::U(_) => self.unify(
-                    expected_ty,
-                    &[Type::U],
-                    &[Type::Unknown, Type::UnspecifiedUnsignedInt],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::U1(_) => self.unify(
-                    expected_ty,
-                    &[Type::U1],
-                    &[Type::Unknown, Type::UnspecifiedUnsignedInt],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::U2(_) => self.unify(
-                    expected_ty,
-                    &[Type::U2],
-                    &[Type::Unknown, Type::UnspecifiedUnsignedInt],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::U4(_) => self.unify(
-                    expected_ty,
-                    &[Type::U4],
-                    &[Type::Unknown, Type::UnspecifiedUnsignedInt],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::U8(_) => self.unify(
-                    expected_ty,
-                    &[Type::U8],
-                    &[Type::Unknown, Type::UnspecifiedUnsignedInt],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::UnspecifiedInt(_) => self.unify(
-                    expected_ty,
-                    &[
-                        Type::U8,
-                        Type::U4,
-                        Type::U2,
-                        Type::U1,
-                        Type::U,
-                        Type::I8,
-                        Type::I4,
-                        Type::I2,
-                        Type::I1,
-                        Type::I,
-                        Type::UnspecifiedSignedInt,
-                        Type::UnspecifiedUnsignedInt,
-                    ],
-                    &[Type::Unknown],
-                    expr_span,
-                ),
-                nazmc_ast::NumKind::UnspecifiedFloat(_) => self.unify(
-                    expected_ty,
-                    &[Type::F8, Type::F4, Type::UnspecifiedFloat],
-                    &[Type::Unknown],
-                    expr_span,
-                ),
+                nazmc_ast::NumKind::F4(_) => Type::F4,
+                nazmc_ast::NumKind::F8(_) => Type::F8,
+                nazmc_ast::NumKind::I(_) => Type::I,
+                nazmc_ast::NumKind::I1(_) => Type::I1,
+                nazmc_ast::NumKind::I2(_) => Type::I2,
+                nazmc_ast::NumKind::I4(_) => Type::I4,
+                nazmc_ast::NumKind::I8(_) => Type::I8,
+                nazmc_ast::NumKind::U(_) => Type::U,
+                nazmc_ast::NumKind::U1(_) => Type::U1,
+                nazmc_ast::NumKind::U2(_) => Type::U2,
+                nazmc_ast::NumKind::U4(_) => Type::U4,
+                nazmc_ast::NumKind::U8(_) => Type::U8,
+                nazmc_ast::NumKind::UnspecifiedInt(_) => Type::UnspecifiedUnsignedInt,
+                nazmc_ast::NumKind::UnspecifiedFloat(_) => Type::UnspecifiedFloat,
             },
-        }
+        });
+
+        self.unify(expected_ty, &found_ty, expr_span);
     }
 
     fn infer_tuple_expr(&mut self, expected_ty: &Ty, exprs: &[ExprKey], expr_span: Span) {
@@ -204,13 +118,8 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.add_type_mismatch_err(expected_ty, &found_ty, expr_span);
             }
         } else {
-            let tuple_ty = self.infer_tuple_expr_with_unknown(exprs);
-            self.unify(
-                expected_ty,
-                &[tuple_ty.inner()],
-                &[Type::Unknown],
-                expr_span,
-            );
+            let found_ty = self.infer_tuple_expr_with_unknown(exprs);
+            self.unify(expected_ty, &found_ty, expr_span);
         }
     }
 
@@ -222,6 +131,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             tuple_types.push(Ty::new(Type::Unknown));
             self.infer_expr(&tuple_types[i], expr_key);
         }
+
         Ty::new(Type::Tuple(TupleType { types: tuple_types }))
     }
 
@@ -330,7 +240,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         for expr_key in array_elements {
             let expr_typ = self.analyze_expr(*expr_key);
 
-            if self.is_subtype_of(&underlying_typ.borrow(), &expr_typ.borrow()) {
+            if self.is_subtype_of(&underlying_typ, &expr_typ) {
                 continue;
             }
 
