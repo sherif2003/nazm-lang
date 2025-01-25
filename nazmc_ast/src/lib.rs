@@ -69,10 +69,13 @@ pub struct Resolved {
     /// The list of all fields struct expressions paths
     pub field_structs_paths_exprs: TiVec<FieldsStructPathKey, FieldsStructKey>,
     /// The list of all paths expressions that have no leading pkgs paths
+    /// which point only to local vars, statics, consts and fns
     pub paths_no_pkgs_exprs: TiVec<PathNoPkgKey, Item>,
     /// The list of all paths expressions that have leading pkgs paths
+    /// which point only to statics, consts and fns
     pub paths_with_pkgs_exprs: TiVec<PathWithPkgKey, Item>,
-    /// The list of resolved types paths expressions which point only to resolved structs
+    /// The list of resolved types paths expressions
+    /// which point only to resolved structs
     pub types_paths: TiVec<PathTypeExprKey, (Item, Span)>,
 }
 

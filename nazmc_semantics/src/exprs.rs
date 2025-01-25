@@ -5,7 +5,7 @@ use nazmc_diagnostics::{span::Span, Diagnostic};
 use thin_vec::ThinVec;
 
 use crate::{
-    typed_ast::{ArrayType, FieldInfo, TupleType, Ty, Type},
+    typed_ast::{ArrayType, TupleType, Ty, Type},
     SemanticsAnalyzer,
 };
 
@@ -330,7 +330,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         for expr_key in array_elements {
             let expr_typ = self.analyze_expr(*expr_key);
 
-            if self.is_subtype_of(&underlying_typ, &expr_typ) {
+            if self.is_subtype_of(&underlying_typ.borrow(), &expr_typ.borrow()) {
                 continue;
             }
 

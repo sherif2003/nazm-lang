@@ -145,10 +145,6 @@ impl<'a> SemanticsAnalyzer<'a> {
                         self.ast.lets[*let_stm_key].binding.kind.clone(),
                         &let_stm_type,
                     );
-
-                    // self.typed_ast
-                    //     .lets
-                    //     .insert(*let_stm_key, let_stm_type.clone());
                 }
                 Stm::While(expr_key, scope_key) => todo!(),
                 Stm::If(if_expr) => todo!(),
@@ -338,8 +334,18 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
-    fn is_subtype_of(&self, sub: &Ty, sup: &Ty) -> bool {
-        match (sub.inner(), sup.inner()) {
+    fn get_super_type(&self, t1: &Ty, t2: &Ty) -> Option<Ty> {
+        if self.is_subtype_of(&t1.borrow(), &t2.borrow()) {
+            Some(t2.clone())
+        } else if self.is_subtype_of(&t2.borrow(), &t1.borrow()) {
+            Some(t1.clone())
+        } else {
+            None
+        }
+    }
+
+    fn is_subtype_of(&self, sub: &Type, sup: &Type) -> bool {
+        match (sub, sup) {
             (Type::Unknown, _)
             | (
                 Type::UnspecifiedUnsignedInt,
@@ -356,11 +362,8 @@ impl<'a> SemanticsAnalyzer<'a> {
                 | Type::U8,
             )
             | (Type::UnspecifiedSignedInt, Type::I | Type::I1 | Type::I2 | Type::I4 | Type::I8)
-            | (Type::UnspecifiedFloat, Type::UnspecifiedFloat | Type::F4 | Type::F8) => {
-                *sub.borrow_mut() = sup.inner();
-                true
-            }
-            (Type::UnspecifiedUnsignedInt, Type::UnspecifiedUnsignedInt)
+            | (Type::UnspecifiedFloat, Type::UnspecifiedFloat | Type::F4 | Type::F8)
+            | (Type::UnspecifiedUnsignedInt, Type::UnspecifiedUnsignedInt)
             | (Type::UnspecifiedSignedInt, Type::UnspecifiedSignedInt)
             | (Type::I, Type::I)
             | (Type::I1, Type::I1)
@@ -388,30 +391,38 @@ impl<'a> SemanticsAnalyzer<'a> {
                     underlying_typ: sub,
                     size: _,
                 }),
+                Type::Slice(sup),
+            ) => self.is_subtype_of(&sub.borrow(), &sup.borrow()),
+            (
+                Type::Array(ArrayType {
+                    underlying_typ: sub,
+                    size: sub_size,
+                }),
                 Type::Array(ArrayType {
                     underlying_typ: sup,
-                    size: _,
-                })
-                | Type::Slice(sup),
-            ) => self.is_subtype_of(&sub, &sup),
-            (Type::Tuple(sub), Type::Tuple(sup)) => sub
+                    size: sup_size,
+                }),
+            ) if sub_size == sup_size => self.is_subtype_of(&sub.borrow(), &sup.borrow()),
+            (Type::Tuple(sub), Type::Tuple(sup)) if sub.types.len() == sup.types.len() => sub
                 .types
-                .into_iter()
-                .zip(sup.types)
-                .all(|(sub, sup)| self.is_subtype_of(&sub, &sup)),
-            (Type::Lambda(sub), Type::Lambda(sup)) => {
+                .iter()
+                .zip(&sup.types)
+                .all(|(sub, sup)| self.is_subtype_of(&sub.borrow(), &sup.borrow())),
+            (Type::Lambda(sub), Type::Lambda(sup))
+                if sub.params_types.len() == sup.params_types.len() =>
+            {
                 sub.params_types
-                    .into_iter()
-                    .zip(sup.params_types)
-                    .all(|(sub, sup)| self.is_subtype_of(&sup, &sub))
-                    && self.is_subtype_of(&sub.return_type, &sup.return_type)
+                    .iter()
+                    .zip(&sup.params_types)
+                    .all(|(sub, sup)| self.is_subtype_of(&sup.borrow(), &sub.borrow()))
+                    && self.is_subtype_of(&sub.return_type.borrow(), &sup.return_type.borrow())
             }
-            (Type::FnPtr(sub), Type::FnPtr(sup)) => {
+            (Type::FnPtr(sub), Type::FnPtr(sup)) if sub.params.len() == sup.params.len() => {
                 sub.params
-                    .into_iter()
-                    .zip(sup.params)
-                    .all(|(sub, sup)| self.is_subtype_of(&sup, &sub))
-                    && self.is_subtype_of(&sub.return_typ, &sup.return_typ)
+                    .iter()
+                    .zip(&sup.params)
+                    .all(|(sub, sup)| self.is_subtype_of(&sup.borrow(), &sub.borrow()))
+                    && self.is_subtype_of(&sub.return_typ.borrow(), &sup.return_typ.borrow())
             }
             _ => false,
         }
