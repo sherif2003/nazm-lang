@@ -7,6 +7,17 @@ pub struct RcCell<T: Clone> {
     data: Rc<RefCell<T>>,
 }
 
+#[derive(Default)]
+pub struct TypedAST {
+    pub consts: HashMap<ConstKey, Const>,
+    pub statics: HashMap<StaticKey, Static>,
+    pub tuple_structs: HashMap<TupleStructKey, TupleStruct>,
+    pub fields_structs: HashMap<FieldsStructKey, FieldsStruct>,
+    pub fns_signatures: HashMap<FnKey, FnPtrType>,
+    pub lets: HashMap<LetStmKey, LetStm>,
+    pub exprs: HashMap<ExprKey, Ty>,
+}
+
 impl<T: Clone> RcCell<T> {
     #[inline]
     pub fn new(data: T) -> Self {
@@ -32,27 +43,50 @@ impl<T: Clone> RcCell<T> {
 }
 
 pub type Ty = RcCell<Type>;
+pub type InfTy = RcCell<InferedType>;
+pub type ConTy = RcCell<ConcreteType>;
 
-#[derive(Default)]
-pub struct TypedAST {
-    pub consts: HashMap<ConstKey, Const>,
-    pub statics: HashMap<StaticKey, Static>,
-    pub tuple_structs: HashMap<TupleStructKey, TupleStruct>,
-    pub fields_structs: HashMap<FieldsStructKey, FieldsStruct>,
-    pub fns_signatures: HashMap<FnKey, FnPtrType>,
-    pub lets: HashMap<LetStmKey, LetStm>,
-    pub exprs: HashMap<ExprKey, Ty>,
+#[derive(Clone, Debug, PartialEq)]
+pub enum Type {
+    Infered(InfTy),
+    Concrete(ConTy),
+}
+
+impl Default for Type {
+    fn default() -> Self {
+        Self::Infered(InfTy::default())
+    }
+}
+
+impl Ty {
+    pub fn new_unknown() -> Self {
+        Self::default()
+    }
+
+    pub fn new_unspecified_unsigned_int() -> Self {
+        Self::new(Type::Infered(InfTy::new(
+            InferedType::UnspecifiedUnsignedInt,
+        )))
+    }
+
+    pub fn new_unspecified_signed_int() -> Self {
+        Self::new(Type::Infered(InfTy::new(InferedType::UnspecifiedSignedInt)))
+    }
+
+    pub fn new_unspecified_float() -> Self {
+        Self::new(Type::Infered(InfTy::new(InferedType::UnspecifiedFloat)))
+    }
+
+    pub fn new_concrete(con_type: ConcreteType) -> Self {
+        Self::new(Type::Concrete(ConTy::new(con_type)))
+    }
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
-pub enum Type {
+pub enum ConcreteType {
     #[default]
-    Unknown,
     Never,
     Unit,
-    UnspecifiedUnsignedInt,
-    UnspecifiedSignedInt,
-    UnspecifiedFloat,
     I,
     I1,
     I2,
@@ -80,6 +114,16 @@ pub enum Type {
     Tuple(TupleType),
     Lambda(LambdaType),
     FnPtr(FnPtrType),
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub enum InferedType {
+    #[default]
+    Unknown,
+    UnspecifiedUnsignedInt,
+    UnspecifiedSignedInt,
+    UnspecifiedFloat,
+    Known(ConTy),
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]

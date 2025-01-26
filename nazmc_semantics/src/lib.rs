@@ -14,7 +14,10 @@ use nazmc_diagnostics::{
 };
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
-use typed_ast::{ArrayType, FnPtrType, LambdaType, LetStm, TupleType, Ty, Type, TypedAST};
+use typed_ast::{
+    ArrayType, ConTy, ConcreteType, FnPtrType, InfTy, InferedType, LambdaType, LetStm, TupleType,
+    Ty, Type, TypedAST,
+};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum CycleDetected {
@@ -125,7 +128,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     let let_stm_type = self.ast.lets[*let_stm_key]
                         .binding
                         .typ
-                        .map_or(Ty::new(Type::Unknown), |type_expr_key| {
+                        .map_or(Ty::new_unknown(), |type_expr_key| {
                             self.analyze_type_expr(type_expr_key).0
                         });
 
@@ -148,7 +151,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 }
                 Stm::While(expr_key, scope_key) => todo!(),
                 Stm::If(if_expr) => todo!(),
-                Stm::Expr(expr_key) => self.infer_expr(&Ty::new(Type::Unknown), *expr_key),
+                Stm::Expr(expr_key) => self.infer_expr(&Ty::new_unknown(), *expr_key),
             }
         }
     }
@@ -172,12 +175,18 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .insert(id.id, ty.clone());
             }
             BindingKind::Tuple(kinds, span) => {
-                if let Type::Tuple(TupleType { types }) = ty.inner() {
-                    if kinds.len() == types.len() {
-                        for i in 0..kinds.len() {
-                            let kind = &kinds[i];
-                            let ty = &types[i];
-                            self.set_bindnig_ty(let_stm_key, kind.clone(), ty);
+                if let Type::Concrete(con_ty) = ty.inner() {
+                    if let ConcreteType::Tuple(TupleType { types }) = con_ty.inner() {
+                        if kinds.len() == types.len() {
+                            for i in 0..kinds.len() {
+                                let kind = &kinds[i];
+                                let ty = &types[i];
+                                self.set_bindnig_ty(let_stm_key, kind.clone(), ty);
+                            }
+                        } else {
+                            let found_ty =
+                                self.destructed_tuple_to_ty_with_unknown(let_stm_key, &kinds);
+                            self.add_type_mismatch_err(ty, &found_ty, span);
                         }
                     } else {
                         let found_ty =
@@ -200,11 +209,12 @@ impl<'a> SemanticsAnalyzer<'a> {
         let mut tuple_types = ThinVec::with_capacity(kinds.len());
         for i in 0..kinds.len() {
             let kind = &kinds[i];
-            let ty = Ty::new(Type::Unknown);
+            let ty = Ty::new_unknown();
             self.set_bindnig_ty(let_stm_key, kind.clone(), &ty);
             tuple_types.push(ty);
         }
-        Ty::new(Type::Tuple(TupleType { types: tuple_types }))
+
+        Ty::new_concrete(ConcreteType::Tuple(TupleType { types: tuple_types }))
     }
 
     fn unify(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
@@ -250,75 +260,84 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     fn fmt_type(&self, ty: &Ty) -> String {
         match ty.inner() {
-            Type::Unknown => format!("_"),
-            Type::Never => format!("!!"),
-            Type::Unit => format!("()"),
-            Type::UnspecifiedUnsignedInt => format!("{{عدد}}"),
-            Type::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
-            Type::UnspecifiedFloat => format!("{{عدد عشري}}"),
-            Type::I => format!("ص"),
-            Type::I1 => format!("ص1"),
-            Type::I2 => format!("ص2"),
-            Type::I4 => format!("ص4"),
-            Type::I8 => format!("ص8"),
-            Type::U => format!("ط"),
-            Type::U1 => format!("ط1"),
-            Type::U2 => format!("ط2"),
-            Type::U4 => format!("ط4"),
-            Type::U8 => format!("ط8"),
-            Type::F4 => format!("ع4"),
-            Type::F8 => format!("ع8"),
-            Type::Bool => format!("شرط"),
-            Type::Char => format!("حرف"),
-            Type::Str => format!("متن"),
-            Type::UnitStruct(unit_struct_key) => {
-                let item_info = self.ast.unit_structs[unit_struct_key].info;
+            Type::Infered(inf_ty) => match inf_ty.inner() {
+                InferedType::Unknown => format!("_"),
+                InferedType::UnspecifiedUnsignedInt => format!("{{عدد}}"),
+                InferedType::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
+                InferedType::UnspecifiedFloat => format!("{{عدد عشري}}"),
+                InferedType::Known(ty) => self.fmt_con_ty(&ty),
+            },
+            Type::Concrete(con_ty) => self.fmt_con_ty(&con_ty),
+        }
+    }
+
+    fn fmt_con_ty(&self, con_ty: &ConTy) -> String {
+        match &*con_ty.borrow() {
+            ConcreteType::Never => format!("!!"),
+            ConcreteType::Unit => format!("()"),
+            ConcreteType::I => format!("ص"),
+            ConcreteType::I1 => format!("ص1"),
+            ConcreteType::I2 => format!("ص2"),
+            ConcreteType::I4 => format!("ص4"),
+            ConcreteType::I8 => format!("ص8"),
+            ConcreteType::U => format!("ط"),
+            ConcreteType::U1 => format!("ط1"),
+            ConcreteType::U2 => format!("ط2"),
+            ConcreteType::U4 => format!("ط4"),
+            ConcreteType::U8 => format!("ط8"),
+            ConcreteType::F4 => format!("ع4"),
+            ConcreteType::F8 => format!("ع8"),
+            ConcreteType::Bool => format!("شرط"),
+            ConcreteType::Char => format!("حرف"),
+            ConcreteType::Str => format!("متن"),
+            ConcreteType::UnitStruct(unit_struct_key) => {
+                let item_info = self.ast.unit_structs[*unit_struct_key].info;
                 self.fmt_item_name(item_info)
             }
-            Type::TupleStruct(tuple_struct_key) => {
-                let item_info = self.ast.tuple_structs[tuple_struct_key].info;
+            ConcreteType::TupleStruct(tuple_struct_key) => {
+                let item_info = self.ast.tuple_structs[*tuple_struct_key].info;
                 self.fmt_item_name(item_info)
             }
-            Type::FieldsStruct(fields_struct_key) => {
-                let item_info = self.ast.fields_structs[fields_struct_key].info;
+            ConcreteType::FieldsStruct(fields_struct_key) => {
+                let item_info = self.ast.fields_structs[*fields_struct_key].info;
                 self.fmt_item_name(item_info)
             }
-            Type::Slice(rc_cell) => format!("[{}]", self.fmt_type(&rc_cell)),
-            Type::Ptr(rc_cell) => format!("*{}", self.fmt_type(&rc_cell)),
-            Type::Ref(rc_cell) => format!("#{}", self.fmt_type(&rc_cell)),
-            Type::PtrMut(rc_cell) => format!("*متغير {}", self.fmt_type(&rc_cell)),
-            Type::RefMut(rc_cell) => format!("#متغير {}", self.fmt_type(&rc_cell)),
-            Type::Array(array_type) => format!(
+            ConcreteType::Slice(rc_cell) => format!("[{}]", self.fmt_type(&rc_cell)),
+            ConcreteType::Ptr(rc_cell) => format!("*{}", self.fmt_type(&rc_cell)),
+            ConcreteType::Ref(rc_cell) => format!("#{}", self.fmt_type(&rc_cell)),
+            ConcreteType::PtrMut(rc_cell) => format!("*متغير {}", self.fmt_type(&rc_cell)),
+            ConcreteType::RefMut(rc_cell) => format!("#متغير {}", self.fmt_type(&rc_cell)),
+            ConcreteType::Array(array_type) => format!(
                 "[{}؛ {}]",
                 self.fmt_type(&array_type.underlying_typ),
                 array_type.size
             ),
-            Type::Tuple(tuple_type) => {
+            ConcreteType::Tuple(tuple_type) => {
                 format!(
                     "({})",
                     tuple_type
                         .types
-                        .into_iter()
+                        .iter()
                         .map(|ty| self.fmt_type(&ty))
                         .collect::<Vec<_>>()
                         .join("، ")
                 )
             }
-            Type::Lambda(lambda_type) => format!(
+            ConcreteType::Lambda(lambda_type) => format!(
                 "({}) -> {}",
                 lambda_type
                     .params_types
-                    .into_iter()
+                    .iter()
                     .map(|param_ty| self.fmt_type(&param_ty))
                     .collect::<Vec<_>>()
                     .join("، "),
                 self.fmt_type(&lambda_type.return_type)
             ),
-            Type::FnPtr(fn_ptr_type) => format!(
+            ConcreteType::FnPtr(fn_ptr_type) => format!(
                 "دالة({}) -> {}",
                 fn_ptr_type
                     .params
-                    .into_iter()
+                    .iter()
                     .map(|param_ty| self.fmt_type(&param_ty))
                     .collect::<Vec<_>>()
                     .join("، "),
@@ -328,99 +347,164 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     fn get_super_type(&self, t1: &Ty, t2: &Ty) -> Option<Ty> {
-        if self.is_subtype_of(t1, t2) {
-            Some(t2.clone())
-        } else if self.is_subtype_of(t2, t1) {
-            Some(t1.clone())
-        } else {
-            None
-        }
+        // if self.is_subtype_of(t1, t2) {
+        //     Some(t2.clone())
+        // } else if self.is_subtype_of(t2, t1) {
+        //     Some(t1.clone())
+        // } else {
+        //     None
+        // }
+        None
     }
 
-    fn is_subtype_of(&self, sub: &Ty, sup: &Ty) -> bool {
-        match (&*sub.borrow(), &*sup.borrow()) {
-            (Type::Never, ty2) if !matches!(ty2, Type::Unknown) => true,
-            (Type::Unknown, _)
-            | (
-                Type::UnspecifiedUnsignedInt,
-                Type::UnspecifiedSignedInt
-                | Type::I
-                | Type::I1
-                | Type::I2
-                | Type::I4
-                | Type::I8
-                | Type::U
-                | Type::U1
-                | Type::U2
-                | Type::U4
-                | Type::U8,
-            )
-            | (Type::UnspecifiedSignedInt, Type::I | Type::I1 | Type::I2 | Type::I4 | Type::I8)
-            | (Type::UnspecifiedFloat, Type::UnspecifiedFloat | Type::F4 | Type::F8)
-            | (Type::UnspecifiedUnsignedInt, Type::UnspecifiedUnsignedInt)
-            | (Type::UnspecifiedSignedInt, Type::UnspecifiedSignedInt)
-            | (Type::I, Type::I)
-            | (Type::I1, Type::I1)
-            | (Type::I2, Type::I2)
-            | (Type::I4, Type::I4)
-            | (Type::I8, Type::I8)
-            | (Type::U, Type::U)
-            | (Type::U1, Type::U1)
-            | (Type::U2, Type::U2)
-            | (Type::U4, Type::U4)
-            | (Type::U8, Type::U8)
-            | (Type::F4, Type::F4)
-            | (Type::F8, Type::F8)
-            | (Type::Bool, Type::Bool)
-            | (Type::Char, Type::Char)
-            | (Type::Str, Type::Str) => true,
-            (Type::UnitStruct(key1), Type::UnitStruct(key2)) if key1 == key2 => true,
-            (Type::TupleStruct(key1), Type::TupleStruct(key2)) if key1 == key2 => true,
-            (Type::FieldsStruct(key1), Type::FieldsStruct(key2)) if key1 == key2 => true,
-            (Type::Slice(sub), Type::Slice(sup))
-            | (Type::Ptr(sub), Type::Ptr(sup))
-            | (Type::Ref(sub), Type::Ref(sup) | Type::Ptr(sup))
-            | (Type::PtrMut(sub), Type::PtrMut(sup))
-            | (Type::RefMut(sub), Type::RefMut(sup) | Type::PtrMut(sup))
-            | (
-                Type::Array(ArrayType {
-                    underlying_typ: sub,
-                    size: _,
-                }),
-                Type::Slice(sup),
-            ) => self.is_subtype_of(&sub, &sup),
-            (
-                Type::Array(ArrayType {
-                    underlying_typ: sub,
-                    size: sub_size,
-                }),
-                Type::Array(ArrayType {
-                    underlying_typ: sup,
-                    size: sup_size,
-                }),
-            ) if sub_size == sup_size => self.is_subtype_of(&sub, &sup),
-            (Type::Tuple(sub), Type::Tuple(sup)) if sub.types.len() == sup.types.len() => sub
-                .types
-                .iter()
-                .zip(&sup.types)
-                .all(|(sub, sup)| self.is_subtype_of(&sub, &sup)),
-            (Type::Lambda(sub), Type::Lambda(sup))
-                if sub.params_types.len() == sup.params_types.len() =>
-            {
-                sub.params_types
-                    .iter()
-                    .zip(&sup.params_types)
-                    .all(|(sub, sup)| self.is_subtype_of(&sup, &sub))
-                    && self.is_subtype_of(&sub.return_type, &sup.return_type)
-            }
-            (Type::FnPtr(sub), Type::FnPtr(sup)) if sub.params.len() == sup.params.len() => {
-                sub.params
-                    .iter()
-                    .zip(&sup.params)
-                    .all(|(sub, sup)| self.is_subtype_of(&sup, &sub))
-                    && self.is_subtype_of(&sub.return_typ, &sup.return_typ)
-            }
-            _ => false,
-        }
+    // fn is_subtype_of(&self, sub: &Ty, sup: &Ty) -> bool {
+    //     match (&*sub.borrow(), &*sup.borrow()) {
+    //         (Type::Never, ty2) if !matches!(ty2, Type::Unknown) => true,
+    //         (Type::Unknown, _)
+    //         | (
+    //             Type::UnspecifiedUnsignedInt,
+    //             Type::UnspecifiedSignedInt
+    //             | Type::I
+    //             | Type::I1
+    //             | Type::I2
+    //             | Type::I4
+    //             | Type::I8
+    //             | Type::U
+    //             | Type::U1
+    //             | Type::U2
+    //             | Type::U4
+    //             | Type::U8,
+    //         )
+    //         | (Type::UnspecifiedSignedInt, Type::I | Type::I1 | Type::I2 | Type::I4 | Type::I8)
+    //         | (Type::UnspecifiedFloat, Type::UnspecifiedFloat | Type::F4 | Type::F8)
+    //         | (Type::UnspecifiedUnsignedInt, Type::UnspecifiedUnsignedInt)
+    //         | (Type::UnspecifiedSignedInt, Type::UnspecifiedSignedInt)
+    //         | (Type::I, Type::I)
+    //         | (Type::I1, Type::I1)
+    //         | (Type::I2, Type::I2)
+    //         | (Type::I4, Type::I4)
+    //         | (Type::I8, Type::I8)
+    //         | (Type::U, Type::U)
+    //         | (Type::U1, Type::U1)
+    //         | (Type::U2, Type::U2)
+    //         | (Type::U4, Type::U4)
+    //         | (Type::U8, Type::U8)
+    //         | (Type::F4, Type::F4)
+    //         | (Type::F8, Type::F8)
+    //         | (Type::Bool, Type::Bool)
+    //         | (Type::Char, Type::Char)
+    //         | (Type::Str, Type::Str)
+    //         | (Type::Unit, Type::Unit) => true,
+    //         (Type::UnitStruct(key1), Type::UnitStruct(key2)) if key1 == key2 => true,
+    //         (Type::TupleStruct(key1), Type::TupleStruct(key2)) if key1 == key2 => true,
+    //         (Type::FieldsStruct(key1), Type::FieldsStruct(key2)) if key1 == key2 => true,
+    //         (Type::Slice(sub), Type::Slice(sup))
+    //         | (Type::Ptr(sub), Type::Ptr(sup))
+    //         | (Type::Ref(sub), Type::Ref(sup) | Type::Ptr(sup))
+    //         | (Type::PtrMut(sub), Type::PtrMut(sup))
+    //         | (Type::RefMut(sub), Type::RefMut(sup) | Type::PtrMut(sup))
+    //         | (
+    //             Type::Array(ArrayType {
+    //                 underlying_typ: sub,
+    //                 size: _,
+    //             }),
+    //             Type::Slice(sup),
+    //         ) => self.is_subtype_of(&sub, &sup),
+    //         (
+    //             Type::Array(ArrayType {
+    //                 underlying_typ: sub,
+    //                 size: sub_size,
+    //             }),
+    //             Type::Array(ArrayType {
+    //                 underlying_typ: sup,
+    //                 size: sup_size,
+    //             }),
+    //         ) if sub_size == sup_size => self.is_subtype_of(&sub, &sup),
+    //         (Type::Tuple(sub), Type::Tuple(sup)) if sub.types.len() == sup.types.len() => sub
+    //             .types
+    //             .iter()
+    //             .zip(&sup.types)
+    //             .all(|(sub, sup)| self.is_subtype_of(&sub, &sup)),
+    //         (Type::Lambda(sub), Type::Lambda(sup))
+    //             if sub.params_types.len() == sup.params_types.len() =>
+    //         {
+    //             sub.params_types
+    //                 .iter()
+    //                 .zip(&sup.params_types)
+    //                 .all(|(sub, sup)| self.is_subtype_of(&sup, &sub))
+    //                 && self.is_subtype_of(&sub.return_type, &sup.return_type)
+    //         }
+    //         (Type::FnPtr(sub), Type::FnPtr(sup)) if sub.params.len() == sup.params.len() => {
+    //             sub.params
+    //                 .iter()
+    //                 .zip(&sup.params)
+    //                 .all(|(sub, sup)| self.is_subtype_of(&sup, &sub))
+    //                 && self.is_subtype_of(&sub.return_typ, &sup.return_typ)
+    //         }
+    //         _ => false,
+    //     }
+    // }
+}
+
+// fn infer_unknown_type(t1: &Ty, t2: &Ty) {
+//     if can_be_infered(&t1.borrow(), &t2.borrow()) {
+//         *t1.borrow_mut() = t2.inner();
+//     } else if can_be_infered(&t2.borrow(), &t1.borrow()) {
+//         *t2.borrow_mut() = t1.inner();
+//     }
+// }
+
+// fn can_be_infered(from: &Type, to: &Type) -> bool {
+//     match (from) {
+//         Type::Infered(inf_ty) => match (inf_ty.inner(), to) {
+//             (
+//                 InferedType::UnspecifiedUnsignedInt,
+//                 Type::I
+//                 | Type::I1
+//                 | Type::I2
+//                 | Type::I4
+//                 | Type::I8
+//                 | Type::U
+//                 | Type::U1
+//                 | Type::U2
+//                 | Type::U4
+//                 | Type::U8,
+//             )
+//             | (
+//                 InferedType::UnspecifiedSignedInt,
+//                 Type::I | Type::I1 | Type::I2 | Type::I4 | Type::I8,
+//             )
+//             | (InferedType::UnspecifiedFloat, Type::F4 | Type::F8) => true,
+//             (InferedType::Unknown, to) if *to != *new_unknown_ty().borrow() => true,
+//             (InferedType::UnspecifiedUnsignedInt, to)
+//                 if *to == *new_unspecified_signed_int_ty().borrow() =>
+//             {
+//                 true
+//             }
+//             _ => false,
+//         },
+//         _ => false,
+//     }
+// }
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn test_infer() {
+        let t1 = new_unknown_ty();
+        let t2 = new_unspecified_unsigned_int_ty();
+        let t3 = new_unspecified_signed_int_ty();
+        let t4 = Ty::new(Type::I4);
+        infer_unknown_type(&t1, &t2);
+        assert_eq!(*t1.borrow(), Type::UnspecifiedUnsignedInt);
+        infer_unknown_type(&t2, &t3);
+        // assert_eq!(*t1.borrow(), Type::UnspecifiedSignedInt);
+        assert_eq!(*t2.borrow(), Type::UnspecifiedSignedInt);
+        infer_unknown_type(&t3, &t4);
+        // assert_eq!(*t1.borrow(), Type::I4);
+        // assert_eq!(*t2.borrow(), Type::I4);
+        assert_eq!(*t3.borrow(), Type::I4);
     }
 }
