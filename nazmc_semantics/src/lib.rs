@@ -15,7 +15,7 @@ use nazmc_diagnostics::{
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
 use typed_ast::{
-    ArrayType, ConTy, ConcreteType, FnPtrType, InfTy, InferedType, LambdaType, LetStm, TupleType,
+    ArrayType, ConTy, ConcreteType, FnPtrType, InfTy, InferredType, LambdaType, LetStm, TupleType,
     Ty, Type, TypedAST,
 };
 
@@ -260,12 +260,12 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     fn fmt_type(&self, ty: &Ty) -> String {
         match ty.inner() {
-            Type::Infered(inf_ty) => match inf_ty.inner() {
-                InferedType::Unknown => format!("_"),
-                InferedType::UnspecifiedUnsignedInt => format!("{{عدد}}"),
-                InferedType::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
-                InferedType::UnspecifiedFloat => format!("{{عدد عشري}}"),
-                InferedType::Known(ty) => self.fmt_con_ty(&ty),
+            Type::Inferred(inf_ty) => match inf_ty.inner() {
+                InferredType::Unknown => format!("_"),
+                InferredType::UnspecifiedUnsignedInt => format!("{{عدد}}"),
+                InferredType::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
+                InferredType::UnspecifiedFloat => format!("{{عدد عشري}}"),
+                InferredType::Known(ty) => self.fmt_con_ty(&ty),
             },
             Type::Concrete(con_ty) => self.fmt_con_ty(&con_ty),
         }
@@ -446,46 +446,108 @@ impl<'a> SemanticsAnalyzer<'a> {
     // }
 }
 
-// fn infer_unknown_type(t1: &Ty, t2: &Ty) {
-//     if can_be_infered(&t1.borrow(), &t2.borrow()) {
-//         *t1.borrow_mut() = t2.inner();
-//     } else if can_be_infered(&t2.borrow(), &t1.borrow()) {
-//         *t2.borrow_mut() = t1.inner();
-//     }
-// }
+fn infer_unknown_type(t1: &Ty, t2: &Ty) {
+    if can_be_inferred(&mut t1.borrow_mut(), &mut t2.borrow_mut()) {
+    } else if can_be_inferred(&mut t2.borrow_mut(), &mut t1.borrow_mut()) {
+    }
+}
 
-// fn can_be_infered(from: &Type, to: &Type) -> bool {
-//     match (from) {
-//         Type::Infered(inf_ty) => match (inf_ty.inner(), to) {
-//             (
-//                 InferedType::UnspecifiedUnsignedInt,
-//                 Type::I
-//                 | Type::I1
-//                 | Type::I2
-//                 | Type::I4
-//                 | Type::I8
-//                 | Type::U
-//                 | Type::U1
-//                 | Type::U2
-//                 | Type::U4
-//                 | Type::U8,
-//             )
-//             | (
-//                 InferedType::UnspecifiedSignedInt,
-//                 Type::I | Type::I1 | Type::I2 | Type::I4 | Type::I8,
-//             )
-//             | (InferedType::UnspecifiedFloat, Type::F4 | Type::F8) => true,
-//             (InferedType::Unknown, to) if *to != *new_unknown_ty().borrow() => true,
-//             (InferedType::UnspecifiedUnsignedInt, to)
-//                 if *to == *new_unspecified_signed_int_ty().borrow() =>
-//             {
-//                 true
-//             }
-//             _ => false,
-//         },
-//         _ => false,
-//     }
-// }
+fn can_be_inferred(from: &mut Type, to: &mut Type) -> bool {
+    let Type::Inferred(inf_ty) = from else {
+        return false;
+    };
+
+    let con_ty = match to {
+        Type::Inferred(to_inf_ty) => {
+            return match (inf_ty.inner(), to_inf_ty.inner()) {
+                (InferredType::Unknown, t2)
+                | (InferredType::UnspecifiedUnsignedInt, t2 @ InferredType::UnspecifiedSignedInt) =>
+                {
+                    *from = Type::Inferred(to_inf_ty.clone());
+                    true
+                }
+                _ => false,
+            }
+        }
+        Type::Concrete(con_ty) => con_ty,
+    };
+
+    match (inf_ty.inner(), &*con_ty.borrow()) {
+        (InferredType::Unknown, _)
+        | (
+            InferredType::UnspecifiedUnsignedInt,
+            ConcreteType::I
+            | ConcreteType::I1
+            | ConcreteType::I2
+            | ConcreteType::I4
+            | ConcreteType::I8
+            | ConcreteType::U
+            | ConcreteType::U1
+            | ConcreteType::U2
+            | ConcreteType::U4
+            | ConcreteType::U8,
+        )
+        | (
+            InferredType::UnspecifiedSignedInt,
+            ConcreteType::I
+            | ConcreteType::I1
+            | ConcreteType::I2
+            | ConcreteType::I4
+            | ConcreteType::I8,
+        )
+        | (InferredType::UnspecifiedFloat, ConcreteType::F4 | ConcreteType::F8) => {
+            *from = Type::Inferred(InfTy::new(InferredType::Known(con_ty.clone())));
+            true
+        }
+        _ => false,
+    }
+}
+
+fn can_be_infered(from: &Type, to: &Type) -> bool {
+    let Type::Inferred(inf_ty) = from else {
+        return false;
+    };
+
+    let con_ty = match to {
+        Type::Inferred(to_inf_ty) => {
+            return match (&*inf_ty.borrow(), &*to_inf_ty.borrow()) {
+                (InferredType::Unknown, _)
+                | (InferredType::UnspecifiedUnsignedInt, InferredType::UnspecifiedSignedInt) => {
+                    true
+                }
+                _ => false,
+            }
+        }
+        Type::Concrete(con_ty) => con_ty,
+    };
+
+    match (&*inf_ty.borrow(), &*con_ty.borrow()) {
+        (InferredType::Unknown, _)
+        | (
+            InferredType::UnspecifiedUnsignedInt,
+            ConcreteType::I
+            | ConcreteType::I1
+            | ConcreteType::I2
+            | ConcreteType::I4
+            | ConcreteType::I8
+            | ConcreteType::U
+            | ConcreteType::U1
+            | ConcreteType::U2
+            | ConcreteType::U4
+            | ConcreteType::U8,
+        )
+        | (
+            InferredType::UnspecifiedSignedInt,
+            ConcreteType::I
+            | ConcreteType::I1
+            | ConcreteType::I2
+            | ConcreteType::I4
+            | ConcreteType::I8,
+        )
+        | (InferredType::UnspecifiedFloat, ConcreteType::F4 | ConcreteType::F8) => true,
+        _ => false,
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -493,18 +555,18 @@ mod tests {
 
     #[test]
     fn test_infer() {
-        let t1 = new_unknown_ty();
-        let t2 = new_unspecified_unsigned_int_ty();
-        let t3 = new_unspecified_signed_int_ty();
-        let t4 = Ty::new(Type::I4);
+        let t1 = Ty::new_unknown();
+        let t2 = Ty::new_unspecified_unsigned_int();
+        let t3 = Ty::new_unspecified_signed_int();
+        let t4 = Ty::new_concrete(ConcreteType::I4);
         infer_unknown_type(&t1, &t2);
-        assert_eq!(*t1.borrow(), Type::UnspecifiedUnsignedInt);
+        assert_eq!(t1.inner(), Ty::new_unspecified_unsigned_int().inner());
         infer_unknown_type(&t2, &t3);
-        // assert_eq!(*t1.borrow(), Type::UnspecifiedSignedInt);
-        assert_eq!(*t2.borrow(), Type::UnspecifiedSignedInt);
+        assert_eq!(t1.inner(), Ty::new_unspecified_signed_int().inner());
+        assert_eq!(t2.inner(), Ty::new_unspecified_signed_int().inner());
         infer_unknown_type(&t3, &t4);
-        // assert_eq!(*t1.borrow(), Type::I4);
-        // assert_eq!(*t2.borrow(), Type::I4);
-        assert_eq!(*t3.borrow(), Type::I4);
+        assert_eq!(t1.inner(), Ty::new_concrete(ConcreteType::I4).inner());
+        assert_eq!(t2.inner(), Ty::new_concrete(ConcreteType::I4).inner());
+        assert_eq!(t3.inner(), Ty::new_concrete(ConcreteType::I4).inner());
     }
 }

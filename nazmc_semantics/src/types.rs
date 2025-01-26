@@ -168,13 +168,13 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let underlying_typ =
                     self.ast.types_exprs.slices[*slice_type_expr_key].underlying_typ;
                 let (type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
-                (Ty::new(Type::Slice(type_key)), -1, 0)
+                (Ty::new_concrete(ConcreteType::Slice(type_key)), -1, 0)
             }
             TypeExpr::Ptr(ptr_type_expr_key) => {
                 let underlying_typ = self.ast.types_exprs.ptrs[*ptr_type_expr_key].underlying_typ;
                 let (underlying_type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
                 (
-                    Ty::new(Type::Ptr(underlying_type_key)),
+                    Ty::new_concrete(ConcreteType::Ptr(underlying_type_key)),
                     Self::PTR_SIZE,
                     Self::PTR_SIZE as u8,
                 )
@@ -188,14 +188,18 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     (Self::PTR_SIZE, Self::PTR_SIZE as u8)
                 };
-                (Ty::new(Type::Ref(underlying_type_key)), size, align)
+                (
+                    Ty::new_concrete(ConcreteType::Ref(underlying_type_key)),
+                    size,
+                    align,
+                )
             }
             TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
                 let underlying_typ =
                     self.ast.types_exprs.ptrs_mut[*ptr_mut_type_expr_key].underlying_typ;
                 let (underlying_type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
                 (
-                    Ty::new(Type::PtrMut(underlying_type_key)),
+                    Ty::new_concrete(ConcreteType::PtrMut(underlying_type_key)),
                     Self::PTR_SIZE,
                     Self::PTR_SIZE as u8,
                 )
@@ -210,7 +214,11 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     (Self::PTR_SIZE, Self::PTR_SIZE as u8)
                 };
-                (Ty::new(Type::RefMut(underlying_type_key)), size, align)
+                (
+                    Ty::new_concrete(ConcreteType::RefMut(underlying_type_key)),
+                    size,
+                    align,
+                )
             }
         }
     }
@@ -224,14 +232,22 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let key = *key;
                 self.analyze_tuple_struct(key);
                 let s = self.typed_ast.tuple_structs.get(&key).unwrap();
-                (Ty::new(Type::TupleStruct(key)), s.size as i32, s.align)
+                (
+                    Ty::new_concrete(ConcreteType::TupleStruct(key)),
+                    s.size as i32,
+                    s.align,
+                )
             }
             Item::FieldsStruct { vis: _, key } => {
                 let key = *key;
                 self.analyze_fields_struct(key);
                 let s = self.typed_ast.fields_structs.get(&key).unwrap();
 
-                (Ty::new(Type::FieldsStruct(key)), s.size as i32, s.align)
+                (
+                    Ty::new_concrete(ConcreteType::FieldsStruct(key)),
+                    s.size as i32,
+                    s.align,
+                )
             }
             _ => unreachable!(),
         }
@@ -242,25 +258,33 @@ impl<'a> SemanticsAnalyzer<'a> {
         let info = &self.ast.unit_structs[key].info;
         let file_path = &self.files_infos[info.file_key].path;
         if file_path != "أساسي.نظم" {
-            return (Ty::new(Type::UnitStruct(key)), 0, 0);
+            return (Ty::new_concrete(ConcreteType::UnitStruct(key)), 0, 0);
         }
 
         match info.id_key {
-            IdKey::I_TYPE => (Ty::new(Type::I), Self::PTR_SIZE, Self::PTR_SIZE as u8),
-            IdKey::I1_TYPE => (Ty::new(Type::I1), 1, 1),
-            IdKey::I2_TYPE => (Ty::new(Type::I2), 2, 2),
-            IdKey::I4_TYPE => (Ty::new(Type::I4), 4, 4),
-            IdKey::I8_TYPE => (Ty::new(Type::I8), 8, 8),
-            IdKey::U_TYPE => (Ty::new(Type::U), Self::PTR_SIZE, Self::PTR_SIZE as u8),
-            IdKey::U1_TYPE => (Ty::new(Type::U1), 1, 1),
-            IdKey::U2_TYPE => (Ty::new(Type::U2), 2, 2),
-            IdKey::U4_TYPE => (Ty::new(Type::U4), 4, 4),
-            IdKey::U8_TYPE => (Ty::new(Type::U8), 8, 8),
-            IdKey::F4_TYPE => (Ty::new(Type::F4), 4, 4),
-            IdKey::F8_TYPE => (Ty::new(Type::F8), 8, 8),
-            IdKey::BOOL_TYPE => (Ty::new(Type::Bool), 1, 1),
-            IdKey::CHAR_TYPE => (Ty::new(Type::Char), 4, 4),
-            IdKey::STR_TYPE => (Ty::new(Type::Str), -1, 0),
+            IdKey::I_TYPE => (
+                Ty::new_concrete(ConcreteType::I),
+                Self::PTR_SIZE,
+                Self::PTR_SIZE as u8,
+            ),
+            IdKey::I1_TYPE => (Ty::new_concrete(ConcreteType::I1), 1, 1),
+            IdKey::I2_TYPE => (Ty::new_concrete(ConcreteType::I2), 2, 2),
+            IdKey::I4_TYPE => (Ty::new_concrete(ConcreteType::I4), 4, 4),
+            IdKey::I8_TYPE => (Ty::new_concrete(ConcreteType::I8), 8, 8),
+            IdKey::U_TYPE => (
+                Ty::new_concrete(ConcreteType::U),
+                Self::PTR_SIZE,
+                Self::PTR_SIZE as u8,
+            ),
+            IdKey::U1_TYPE => (Ty::new_concrete(ConcreteType::U1), 1, 1),
+            IdKey::U2_TYPE => (Ty::new_concrete(ConcreteType::U2), 2, 2),
+            IdKey::U4_TYPE => (Ty::new_concrete(ConcreteType::U4), 4, 4),
+            IdKey::U8_TYPE => (Ty::new_concrete(ConcreteType::U8), 8, 8),
+            IdKey::F4_TYPE => (Ty::new_concrete(ConcreteType::F4), 4, 4),
+            IdKey::F8_TYPE => (Ty::new_concrete(ConcreteType::F8), 8, 8),
+            IdKey::BOOL_TYPE => (Ty::new_concrete(ConcreteType::Bool), 1, 1),
+            IdKey::CHAR_TYPE => (Ty::new_concrete(ConcreteType::Char), 4, 4),
+            IdKey::STR_TYPE => (Ty::new_concrete(ConcreteType::Str), -1, 0),
             _ => unreachable!(),
         }
     }
@@ -427,7 +451,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         // TODO: Reorder types
 
         (
-            Ty::new(Type::Tuple(TupleType { types })),
+            Ty::new_concrete(ConcreteType::Tuple(TupleType { types })),
             offset as i32,
             max_align,
         )
@@ -459,7 +483,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             .0;
 
         (
-            Ty::new(Type::Lambda(LambdaType {
+            Ty::new_concrete(ConcreteType::Lambda(LambdaType {
                 params_types,
                 return_type,
             })),

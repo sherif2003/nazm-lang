@@ -4,7 +4,7 @@ use nazmc_ast::ExprKey;
 use thin_vec::ThinVec;
 
 use crate::{
-    typed_ast::{ConcreteType, InfTy, InferedType, TupleType, Ty, Type},
+    typed_ast::{ConcreteType, InfTy, InferredType, TupleType, Ty, Type},
     SemanticsAnalyzer,
 };
 

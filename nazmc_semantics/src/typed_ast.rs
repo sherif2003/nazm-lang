@@ -43,18 +43,18 @@ impl<T: Clone> RcCell<T> {
 }
 
 pub type Ty = RcCell<Type>;
-pub type InfTy = RcCell<InferedType>;
+pub type InfTy = RcCell<InferredType>;
 pub type ConTy = RcCell<ConcreteType>;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
-    Infered(InfTy),
+    Inferred(InfTy),
     Concrete(ConTy),
 }
 
 impl Default for Type {
     fn default() -> Self {
-        Self::Infered(InfTy::default())
+        Self::Inferred(InfTy::default())
     }
 }
 
@@ -64,22 +64,34 @@ impl Ty {
     }
 
     pub fn new_unspecified_unsigned_int() -> Self {
-        Self::new(Type::Infered(InfTy::new(
-            InferedType::UnspecifiedUnsignedInt,
+        Self::new(Type::Inferred(InfTy::new(
+            InferredType::UnspecifiedUnsignedInt,
         )))
     }
 
     pub fn new_unspecified_signed_int() -> Self {
-        Self::new(Type::Infered(InfTy::new(InferedType::UnspecifiedSignedInt)))
+        Self::new(Type::Inferred(InfTy::new(
+            InferredType::UnspecifiedSignedInt,
+        )))
     }
 
     pub fn new_unspecified_float() -> Self {
-        Self::new(Type::Infered(InfTy::new(InferedType::UnspecifiedFloat)))
+        Self::new(Type::Inferred(InfTy::new(InferredType::UnspecifiedFloat)))
     }
 
     pub fn new_concrete(con_type: ConcreteType) -> Self {
         Self::new(Type::Concrete(ConTy::new(con_type)))
     }
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub enum InferredType {
+    #[default]
+    Unknown,
+    UnspecifiedUnsignedInt,
+    UnspecifiedSignedInt,
+    UnspecifiedFloat,
+    Known(ConTy),
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
@@ -114,16 +126,6 @@ pub enum ConcreteType {
     Tuple(TupleType),
     Lambda(LambdaType),
     FnPtr(FnPtrType),
-}
-
-#[derive(Clone, Default, Debug, PartialEq)]
-pub enum InferedType {
-    #[default]
-    Unknown,
-    UnspecifiedUnsignedInt,
-    UnspecifiedSignedInt,
-    UnspecifiedFloat,
-    Known(ConTy),
 }
 
 #[derive(Clone, Default, Debug, PartialEq)]
