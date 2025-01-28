@@ -1,4 +1,5 @@
 mod consts;
+mod errors;
 mod exprs;
 mod type_infer;
 mod typed_ast;
@@ -93,9 +94,9 @@ impl<'a> SemanticsAnalyzer<'a> {
             self.analyze_fn_signature(fn_key);
         }
 
-        let fns = std::mem::take(&mut self.ast.fns);
-
-        for _fn in fns {
+        // TODO: Remove the clone
+        // Don't take the ownership as the errors module requires the access to them
+        for _fn in &self.ast.fns.clone() {
             self.current_file_key = _fn.info.file_key;
             self.analyze_scope(_fn.scope_key);
         }
@@ -254,131 +255,5 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
 
         Ty::tuple(tuple_types)
-    }
-
-    fn add_type_mismatch_err(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
-        let mut code_window = CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
-        code_window.mark_error(
-            span,
-            vec![format!(
-                "يُتوقّع النوع `{}` ولكن تم العثور على النوع `{}`",
-                self.fmt_ty(expected_ty),
-                self.fmt_ty(found_ty)
-            )],
-        );
-        let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![code_window]);
-        self.diagnostics.push(diagnostic);
-    }
-
-    fn fmt_pkg_name(&self, pkg_key: PkgKey) -> String {
-        self.pkgs_names[pkg_key]
-            .iter()
-            .map(|id| self.id_pool[*id].as_str())
-            .collect::<Vec<_>>()
-            .join("::")
-    }
-
-    fn fmt_item_name(&self, item_info: ItemInfo) -> String {
-        let pkg = self.fmt_pkg_name(self.files_to_pkgs[item_info.file_key]);
-        let name = &self.id_pool[item_info.id_key];
-        if pkg.is_empty() {
-            name.to_owned()
-        } else {
-            format!("{}::{}", pkg, name)
-        }
-    }
-
-    fn fmt_ty(&self, ty: &Ty) -> String {
-        match ty.inner() {
-            Type::Unknown => format!("_"),
-            Type::UnspecifiedUnsignedInt => format!("{{عدد}}"),
-            Type::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
-            Type::UnspecifiedFloat => format!("{{عدد عشري}}"),
-            Type::TypeVar(ty_var_key) => {
-                let new_ty = &self.s.apply(ty);
-                if new_ty == ty {
-                    // format!("_{}", usize::from(ty_var_key))
-                    self.fmt_ty(&self.s.all_ty_vars[ty_var_key])
-                } else {
-                    self.fmt_ty(new_ty)
-                }
-            }
-            Type::Slice(rc_cell) => format!("[{}]", self.fmt_ty(&rc_cell)),
-            Type::Ptr(rc_cell) => format!("*{}", self.fmt_ty(&rc_cell)),
-            Type::Ref(rc_cell) => format!("#{}", self.fmt_ty(&rc_cell)),
-            Type::PtrMut(rc_cell) => format!("*متغير {}", self.fmt_ty(&rc_cell)),
-            Type::RefMut(rc_cell) => format!("#متغير {}", self.fmt_ty(&rc_cell)),
-            Type::Array(array_type) => format!(
-                "[{}؛ {}]",
-                self.fmt_ty(&array_type.underlying_typ),
-                array_type.size
-            ),
-            Type::Tuple(tuple_type) => {
-                format!(
-                    "({})",
-                    tuple_type
-                        .types
-                        .iter()
-                        .map(|ty| self.fmt_ty(&ty))
-                        .collect::<Vec<_>>()
-                        .join("، ")
-                )
-            }
-            Type::Lambda(lambda_type) => format!(
-                "({}) -> {}",
-                lambda_type
-                    .params_types
-                    .iter()
-                    .map(|param_ty| self.fmt_ty(&param_ty))
-                    .collect::<Vec<_>>()
-                    .join("، "),
-                self.fmt_ty(&lambda_type.return_type)
-            ),
-            Type::FnPtr(fn_ptr_type) => format!(
-                "دالة({}) -> {}",
-                fn_ptr_type
-                    .params_types
-                    .iter()
-                    .map(|param_ty| self.fmt_ty(&param_ty))
-                    .collect::<Vec<_>>()
-                    .join("، "),
-                self.fmt_ty(&fn_ptr_type.return_type)
-            ),
-            Type::Concrete(con_ty) => self.fmt_con_ty(&con_ty),
-        }
-    }
-
-    fn fmt_con_ty(&self, con_ty: &ConcreteType) -> String {
-        match con_ty {
-            ConcreteType::Never => format!("!!"),
-            ConcreteType::Unit => format!("()"),
-            ConcreteType::I => format!("ص"),
-            ConcreteType::I1 => format!("ص1"),
-            ConcreteType::I2 => format!("ص2"),
-            ConcreteType::I4 => format!("ص4"),
-            ConcreteType::I8 => format!("ص8"),
-            ConcreteType::U => format!("ط"),
-            ConcreteType::U1 => format!("ط1"),
-            ConcreteType::U2 => format!("ط2"),
-            ConcreteType::U4 => format!("ط4"),
-            ConcreteType::U8 => format!("ط8"),
-            ConcreteType::F4 => format!("ع4"),
-            ConcreteType::F8 => format!("ع8"),
-            ConcreteType::Bool => format!("شرط"),
-            ConcreteType::Char => format!("حرف"),
-            ConcreteType::Str => format!("متن"),
-            ConcreteType::UnitStruct(unit_struct_key) => {
-                let item_info = self.ast.unit_structs[*unit_struct_key].info;
-                self.fmt_item_name(item_info)
-            }
-            ConcreteType::TupleStruct(tuple_struct_key) => {
-                let item_info = self.ast.tuple_structs[*tuple_struct_key].info;
-                self.fmt_item_name(item_info)
-            }
-            ConcreteType::FieldsStruct(fields_struct_key) => {
-                let item_info = self.ast.fields_structs[*fields_struct_key].info;
-                self.fmt_item_name(item_info)
-            }
-        }
     }
 }

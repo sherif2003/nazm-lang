@@ -1,9 +1,7 @@
-use crate::{type_infer::Substitution, *};
+use crate::*;
 
 impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn infer(&mut self, expr_key: ExprKey) -> Ty {
-        let expr_span = self.ast.exprs[expr_key].span;
-
         let ty = match &self.ast.exprs[expr_key].kind {
             ExprKind::Unit => Ty::unit(),
             ExprKind::Literal(lit_expr) => self.infer_lit_expr(*lit_expr),
@@ -11,51 +9,11 @@ impl<'a> SemanticsAnalyzer<'a> {
             ExprKind::PathInPkg(path_with_pkg_key) => {
                 self.infer_path_with_pkg_expr(*path_with_pkg_key)
             }
-
             ExprKind::UnitStruct(unit_struct_path_key) => {
                 let key = self.ast.state.unit_structs_paths_exprs[*unit_struct_path_key];
                 Ty::unit_struct(key)
             }
-            ExprKind::Call(call_expr) => {
-                let CallExpr {
-                    on,
-                    args,
-                    parens_span,
-                } = call_expr.as_ref();
-
-                let on = *on;
-                let parens_span = *parens_span;
-                let args_len = args.len();
-
-                let mut on_expr_ty = self.infer(on);
-
-                match on_expr_ty.inner() {
-                    Type::Lambda(LambdaType {
-                        params_types,
-                        return_type,
-                    })
-                    | Type::FnPtr(FnPtrType {
-                        params_types,
-                        return_type,
-                    }) => {
-                        if params_types.len() == args_len {
-                            for i in 0..args_len {}
-                        } else {
-                        }
-                    }
-                    Type::TypeVar(ty_var_key) => {}
-                    _ => {
-                        let non_callable_span = self.ast.exprs[on].span;
-                        self.add_calling_non_callable_err(
-                            &on_expr_ty,
-                            non_callable_span,
-                            parens_span,
-                        );
-                    }
-                }
-
-                todo!()
-            }
+            ExprKind::Call(call_expr) => self.infer_call_expr(&call_expr.clone()), // TODO: Remove the clone
             ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
             ExprKind::FieldsStruct(fields_struct_expr) => todo!(),
             ExprKind::Field(field_expr) => todo!(),
@@ -137,22 +95,72 @@ impl<'a> SemanticsAnalyzer<'a> {
         typ.clone()
     }
 
-    fn add_calling_non_callable_err(
+    fn infer_call_expr(
         &mut self,
-        non_callable_ty: &Ty,
-        non_callable_span: Span,
-        parens_span: Span,
-    ) {
-        let msg = format!("");
-        let label1 = format!("يجب أن يكون دالة أو تعبير لامدا");
-        let label2 = format!("ولكنه من النوع `{}`", self.fmt_ty(non_callable_ty));
-        let mut code_window = CodeWindow::new(
-            &self.files_infos[self.current_file_key],
-            non_callable_span.start,
-        );
-        code_window.mark_secondary(non_callable_span, vec![label1, label2]);
-        code_window.mark_error(parens_span, vec![]);
-        let diagnostic = Diagnostic::error(msg, vec![code_window]);
-        self.diagnostics.push(diagnostic);
+        CallExpr {
+            on,
+            args,
+            parens_span,
+        }: &CallExpr,
+    ) -> Ty {
+        let on = *on;
+        let parens_span = *parens_span;
+
+        let on_expr_ty = self.infer(on);
+
+        let (params_types, return_type, is_fn) = if let Type::FnPtr(FnPtrType {
+            params_types,
+            return_type,
+        }) = on_expr_ty.inner()
+        {
+            (params_types, return_type, true)
+        } else if let Type::Lambda(LambdaType {
+            params_types,
+            return_type,
+        }) = on_expr_ty.inner()
+        {
+            (params_types, return_type, false)
+        } else {
+            let non_callable_span = self.ast.exprs[on].span;
+            self.add_calling_non_callable_err(&on_expr_ty, non_callable_span, parens_span);
+            return self.s.new_unknown_ty_var();
+        };
+
+        if params_types.len() == args.len() {
+            for i in 0..args.len() {
+                let arg_ty = self.infer(args[i]);
+                if let Err(err) = self.s.unify(&params_types[i], &arg_ty) {
+                    self.add_incorrect_fn_args_err(
+                        &params_types[i],
+                        &arg_ty,
+                        self.ast.exprs[args[i]].span,
+                        i,
+                        on,
+                        is_fn,
+                    );
+                }
+            }
+        } else {
+            // Infere more types to collect more errors
+            for i in 0..args.len() {
+                let arg_ty = self.infer(args[i]);
+                if i < params_types.len() {
+                    if let Err(err) = self.s.unify(&params_types[i], &arg_ty) {
+                        self.add_incorrect_fn_args_err(
+                            &params_types[i],
+                            &arg_ty,
+                            self.ast.exprs[args[i]].span,
+                            i,
+                            on,
+                            is_fn,
+                        );
+                    }
+                }
+            }
+
+            self.add_incorrect_fn_args_len_err(parens_span, on, true);
+        }
+
+        return_type
     }
 }

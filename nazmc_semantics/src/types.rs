@@ -5,35 +5,6 @@ use crate::*;
 impl<'a> SemanticsAnalyzer<'a> {
     const PTR_SIZE: i32 = usize::BITS as i32 / 8;
 
-    fn get_type_expr_span(&self, type_expr_key: TypeExprKey) -> Span {
-        match &self.ast.types_exprs.all[type_expr_key] {
-            TypeExpr::Path(path_type_expr_key) => self.ast.state.types_paths[*path_type_expr_key].1,
-            TypeExpr::Paren(paren_type_expr_key) => {
-                self.ast.types_exprs.parens[*paren_type_expr_key].span
-            }
-            TypeExpr::Slice(slice_type_expr_key) => {
-                self.ast.types_exprs.slices[*slice_type_expr_key].span
-            }
-            TypeExpr::Ptr(ptr_type_expr_key) => self.ast.types_exprs.ptrs[*ptr_type_expr_key].span,
-            TypeExpr::Ref(ref_type_expr_key) => self.ast.types_exprs.refs[*ref_type_expr_key].span,
-            TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
-                self.ast.types_exprs.ptrs_mut[*ptr_mut_type_expr_key].span
-            }
-            TypeExpr::RefMut(ref_mut_type_expr_key) => {
-                self.ast.types_exprs.refs_mut[*ref_mut_type_expr_key].span
-            }
-            TypeExpr::Tuple(tuple_type_expr_key) => {
-                self.ast.types_exprs.tuples[*tuple_type_expr_key].span
-            }
-            TypeExpr::Array(array_type_expr_key) => {
-                self.ast.types_exprs.arrays[*array_type_expr_key].span
-            }
-            TypeExpr::Lambda(lambda_type_expr_key) => {
-                self.ast.types_exprs.lambdas[*lambda_type_expr_key].span
-            }
-        }
-    }
-
     fn analyze_type_expr_checked(
         &mut self,
         type_expr_key: TypeExprKey,
