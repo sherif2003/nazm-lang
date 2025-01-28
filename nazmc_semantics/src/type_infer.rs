@@ -1,12 +1,12 @@
-use std::{
-    collections::HashMap,
-    ops::{Add, AddAssign},
-};
+use std::collections::HashMap;
 
-use crate::typed_ast::{ArrayType, FnPtrType, LambdaType, Ty, Type, TypeVarKey};
+use nazmc_data_pool::typed_index_collections::TiVec;
+
+use crate::typed_ast::{ArrayType, ConcreteType, FnPtrType, LambdaType, Ty, Type, TypeVarKey};
 
 #[derive(Debug, Default)]
 pub struct Substitution {
+    pub all_ty_vars: TiVec<TypeVarKey, Ty>,
     substitutions: HashMap<TypeVarKey, Ty>,
 }
 
@@ -20,18 +20,35 @@ impl Substitution {
         Self::default()
     }
 
-    pub fn insert(&mut self, ty_var_key: TypeVarKey, ty: Ty) {
-        self.substitutions.insert(ty_var_key, ty);
+    pub fn new_unknown_ty_var(&mut self) -> Ty {
+        let ty_var_key = self.all_ty_vars.push_and_get_key(Ty::new(Type::Unknown));
+        Ty::type_var(ty_var_key)
+    }
+
+    pub fn new_unspecified_unsigned_int_ty_var(&mut self) -> Ty {
+        let ty_var_key = self
+            .all_ty_vars
+            .push_and_get_key(Ty::new(Type::UnspecifiedUnsignedInt));
+        Ty::type_var(ty_var_key)
+    }
+
+    pub fn new_unspecified_float_ty_var(&mut self) -> Ty {
+        let ty_var_key = self
+            .all_ty_vars
+            .push_and_get_key(Ty::new(Type::UnspecifiedFloat));
+        Ty::type_var(ty_var_key)
     }
 
     /// Apply substitutions to a type, recursively replacing type variables
     /// with their substituted types, if present in the substitution map.
     pub fn apply(&self, ty: &Ty) -> Ty {
         match &*ty.borrow() {
-            Type::Unknown | // No substitution for unknown types
-            Type::UnspecifiedUnsignedInt |
-            Type::UnspecifiedSignedInt |
-            Type::UnspecifiedFloat|Type::Concrete(_) => ty.clone(),
+            // No substitution for unknown types
+            Type::Unknown
+            | Type::UnspecifiedUnsignedInt
+            | Type::UnspecifiedSignedInt
+            | Type::UnspecifiedFloat
+            | Type::Concrete(_) => ty.clone(),
 
             // Replace a type variable if it has a substitution
             Type::TypeVar(type_var_key) => {
@@ -44,55 +61,60 @@ impl Substitution {
 
             // Recursively apply substitutions to concrete types
             Type::Slice(inner) => Ty::slice(self.apply(inner)),
-                Type::Ptr(inner) => Ty::ptr(self.apply(inner)),
-                Type::Ref(inner) => Ty::reference(self.apply(inner)),
-                Type::PtrMut(inner) => Ty::ptr_mut(self.apply(inner)),
-                Type::RefMut(inner) => Ty::ref_mut(self.apply(inner)),
+            Type::Ptr(inner) => Ty::ptr(self.apply(inner)),
+            Type::Ref(inner) => Ty::reference(self.apply(inner)),
+            Type::PtrMut(inner) => Ty::ptr_mut(self.apply(inner)),
+            Type::RefMut(inner) => Ty::ref_mut(self.apply(inner)),
 
-                Type::Array(array_type) => {
-                    Ty::array(self.apply(&array_type.underlying_typ), array_type.size)
-                }
+            Type::Array(array_type) => {
+                Ty::array(self.apply(&array_type.underlying_typ), array_type.size)
+            }
 
-                Type::Tuple(tuple_type) => {
-                    Ty::tuple(tuple_type.types.iter().map(|inner| self.apply(inner)))
-                }
+            Type::Tuple(tuple_type) => {
+                Ty::tuple(tuple_type.types.iter().map(|inner| self.apply(inner)))
+            }
 
-                Type::Lambda(lambda_type) => Ty::lambda(
-                    lambda_type
-                        .params_types
-                        .iter()
-                        .map(|param| self.apply(param)),
-                    self.apply(&lambda_type.return_type),
-                ),
+            Type::Lambda(lambda_type) => Ty::lambda(
+                lambda_type
+                    .params_types
+                    .iter()
+                    .map(|param| self.apply(param)),
+                self.apply(&lambda_type.return_type),
+            ),
 
-                Type::FnPtr(fn_ptr_type) => Ty::fn_ptr(
-                    fn_ptr_type.params_types.iter().map(|param| self.apply(param)),
-                    self.apply(&fn_ptr_type.return_type),
-                ),
-
+            Type::FnPtr(fn_ptr_type) => Ty::fn_ptr(
+                fn_ptr_type
+                    .params_types
+                    .iter()
+                    .map(|param| self.apply(param)),
+                self.apply(&fn_ptr_type.return_type),
+            ),
         }
     }
 
-    pub fn unify(t1: &Ty, t2: &Ty) -> Result<Substitution, TypeUnificationErr> {
+    pub fn unify(&mut self, t1: &Ty, t2: &Ty) -> Result<(), TypeUnificationErr> {
+        let t1 = self.apply(t1);
+        let t2 = self.apply(t2);
+
         match (t1.inner(), t2.inner()) {
             // If both are concrete types, compare them recursively
-            (Type::Concrete(c1), Type::Concrete(c2)) if c1 == c2 => Ok(Substitution::new()),
+            (Type::Concrete(c1), Type::Concrete(c2)) if c1 == c2 => Ok(()),
 
             // If both are the same type variable, they're already unified
-            (Type::TypeVar(key1), Type::TypeVar(key2)) if key1 == key2 => Ok(Substitution::new()),
+            (Type::TypeVar(key1), Type::TypeVar(key2)) if key1 == key2 => Ok(()),
 
             // If t1 is a type variable, bind it to t2
-            (Type::TypeVar(key), _) => Self::bind_type_var(key, t2),
+            (Type::TypeVar(key), _) => self.bind_type_var(key, &t2),
 
             // If t2 is a type variable, bind it to t1
-            (_, Type::TypeVar(key)) => Self::bind_type_var(key, &t1),
+            (_, Type::TypeVar(key)) => self.bind_type_var(key, &t1),
 
             // For composite types, unify their components
             (Type::Slice(t1), Type::Slice(t2))
             | (Type::Ptr(t1), Type::Ptr(t2))
             | (Type::Ref(t1), Type::Ref(t2))
             | (Type::PtrMut(t1), Type::PtrMut(t2))
-            | (Type::RefMut(t1), Type::RefMut(t2)) => Substitution::unify(&t1, &t2),
+            | (Type::RefMut(t1), Type::RefMut(t2)) => self.unify(&t1, &t2),
 
             (
                 Type::Array(ArrayType {
@@ -103,16 +125,15 @@ impl Substitution {
                     underlying_typ: t2,
                     size: s2,
                 }),
-            ) if s1 == s2 => Substitution::unify(&t1, &t2),
+            ) if s1 == s2 => self.unify(&t1, &t2),
 
             (Type::Tuple(t1), Type::Tuple(t2)) if t1.types.len() == t2.types.len() => {
-                let mut substitution = Substitution::new();
                 for (t1, t2) in t1.types.iter().zip(t2.types.iter()) {
-                    let t1 = &substitution.apply(t1);
-                    let t2 = &substitution.apply(t2);
-                    substitution += Substitution::unify(t1, t2)?;
+                    let t1 = &self.apply(t1);
+                    let t2 = &self.apply(t2);
+                    self.unify(t1, t2)?;
                 }
-                Ok(substitution)
+                Ok(())
             }
 
             (
@@ -135,16 +156,15 @@ impl Substitution {
                     return_type: return_type2,
                 }),
             ) if params_types1.len() == params_types2.len() => {
-                let mut substitution = Substitution::new();
                 for (t1, t2) in params_types1.iter().zip(params_types2.iter()) {
-                    let t1 = &substitution.apply(t1);
-                    let t2 = &substitution.apply(t2);
-                    substitution += Substitution::unify(t1, t2)?;
+                    let t1 = &self.apply(t1);
+                    let t2 = &self.apply(t2);
+                    self.unify(t1, t2)?;
                 }
-                let return_type1 = &substitution.apply(&return_type1);
-                let return_type2 = &substitution.apply(&return_type2);
-                substitution += Substitution::unify(return_type1, return_type2)?;
-                Ok(substitution)
+                let return_type1 = &self.apply(&return_type1);
+                let return_type2 = &self.apply(&return_type2);
+                self.unify(return_type1, return_type2)?;
+                Ok(())
             }
 
             // Other incompatible types
@@ -155,7 +175,7 @@ impl Substitution {
         }
     }
 
-    fn bind_type_var(ty_var_key: TypeVarKey, ty: &Ty) -> Result<Substitution, TypeUnificationErr> {
+    fn bind_type_var(&mut self, ty_var_key: TypeVarKey, ty: &Ty) -> Result<(), TypeUnificationErr> {
         // Check for cyclic references
         if ty.inner().contains_var(ty_var_key) {
             return Err(TypeUnificationErr::CycleDetected {
@@ -164,30 +184,68 @@ impl Substitution {
             });
         }
 
-        let mut substitution = Substitution::new();
+        match self.all_ty_vars[ty_var_key].inner() {
+            Type::Unknown => {
+                self.substitutions.insert(ty_var_key, ty.clone());
+            }
 
-        substitution.substitutions.insert(ty_var_key, ty.clone());
+            Type::UnspecifiedUnsignedInt => {
+                let (Type::Concrete(
+                    ConcreteType::I
+                    | ConcreteType::I1
+                    | ConcreteType::I2
+                    | ConcreteType::I4
+                    | ConcreteType::I8
+                    | ConcreteType::U
+                    | ConcreteType::U1
+                    | ConcreteType::U2
+                    | ConcreteType::U4
+                    | ConcreteType::U8,
+                )
+                | Type::UnspecifiedUnsignedInt
+                | Type::UnspecifiedSignedInt) = &*ty.borrow()
+                else {
+                    return Err(TypeUnificationErr::CannotUnify {
+                        t1: self.all_ty_vars[ty_var_key].clone(),
+                        t2: ty.clone(),
+                    });
+                };
+                self.substitutions.insert(ty_var_key, ty.clone());
+            }
 
-        Ok(substitution)
-    }
-}
+            Type::UnspecifiedSignedInt => {
+                let (Type::Concrete(
+                    ConcreteType::I
+                    | ConcreteType::I1
+                    | ConcreteType::I2
+                    | ConcreteType::I4
+                    | ConcreteType::I8,
+                )
+                | Type::UnspecifiedSignedInt) = &*ty.borrow()
+                else {
+                    return Err(TypeUnificationErr::CannotUnify {
+                        t1: self.all_ty_vars[ty_var_key].clone(),
+                        t2: ty.clone(),
+                    });
+                };
+                self.substitutions.insert(ty_var_key, ty.clone());
+            }
 
-impl Add for Substitution {
-    type Output = Substitution;
+            Type::UnspecifiedFloat => {
+                let (Type::Concrete(ConcreteType::F4 | ConcreteType::F8) | Type::UnspecifiedFloat) =
+                    &*ty.borrow()
+                else {
+                    return Err(TypeUnificationErr::CannotUnify {
+                        t1: self.all_ty_vars[ty_var_key].clone(),
+                        t2: ty.clone(),
+                    });
+                };
+                self.substitutions.insert(ty_var_key, ty.clone());
+            }
 
-    fn add(mut self, rhs: Self) -> Self::Output {
-        self.add_assign(rhs);
-        self
-    }
-}
+            _ => unreachable!(),
+        }
 
-impl AddAssign for Substitution {
-    fn add_assign(&mut self, rhs: Self) {
-        let result = rhs
-            .substitutions
-            .into_iter()
-            .map(|(tv, ty)| (tv, self.apply(&ty)))
-            .collect::<HashMap<_, _>>();
-        self.substitutions.extend(result);
+        Ok(())
     }
 }

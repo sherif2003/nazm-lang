@@ -1,23 +1,20 @@
 use crate::{type_infer::Substitution, *};
 
 impl<'a> SemanticsAnalyzer<'a> {
-    pub(crate) fn infer(&mut self, expr_key: ExprKey) -> (Substitution, Ty) {
+    pub(crate) fn infer(&mut self, expr_key: ExprKey) -> Ty {
         let expr_span = self.ast.exprs[expr_key].span;
 
-        let (substitution, ty) = match &self.ast.exprs[expr_key].kind {
-            ExprKind::Unit => (Substitution::new(), Ty::unit()),
-            ExprKind::Literal(lit_expr) => (Substitution::new(), self.infer_lit_expr(*lit_expr)),
-            ExprKind::PathNoPkg(path_no_pkg_key) => (
-                Substitution::new(),
-                self.infer_path_no_pkg_expr(*path_no_pkg_key),
-            ),
-            ExprKind::PathInPkg(path_with_pkg_key) => (
-                Substitution::new(),
-                self.infer_path_with_pkg_expr(*path_with_pkg_key),
-            ),
+        let ty = match &self.ast.exprs[expr_key].kind {
+            ExprKind::Unit => Ty::unit(),
+            ExprKind::Literal(lit_expr) => self.infer_lit_expr(*lit_expr),
+            ExprKind::PathNoPkg(path_no_pkg_key) => self.infer_path_no_pkg_expr(*path_no_pkg_key),
+            ExprKind::PathInPkg(path_with_pkg_key) => {
+                self.infer_path_with_pkg_expr(*path_with_pkg_key)
+            }
+
             ExprKind::UnitStruct(unit_struct_path_key) => {
                 let key = self.ast.state.unit_structs_paths_exprs[*unit_struct_path_key];
-                (Substitution::new(), Ty::unit_struct(key))
+                Ty::unit_struct(key)
             }
             ExprKind::Call(call_expr) => {
                 let CallExpr {
@@ -30,8 +27,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let parens_span = *parens_span;
                 let args_len = args.len();
 
-                let (s, mut on_expr_ty) = self.infer(on);
-                on_expr_ty = s.apply(&on_expr_ty);
+                let mut on_expr_ty = self.infer(on);
 
                 match on_expr_ty.inner() {
                     Type::Lambda(LambdaType {
@@ -80,7 +76,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         self.typed_ast.exprs.insert(expr_key, ty.clone());
 
-        (substitution, ty)
+        ty
     }
 
     fn infer_lit_expr(&mut self, lit_expr: LiteralExpr) -> Ty {
@@ -101,8 +97,8 @@ impl<'a> SemanticsAnalyzer<'a> {
                 NumKind::U2(_) => Ty::u2(),
                 NumKind::U4(_) => Ty::u4(),
                 NumKind::U8(_) => Ty::u8(),
-                NumKind::UnspecifiedInt(_) => return self.new_unspecified_unsigned_int_ty_var(),
-                NumKind::UnspecifiedFloat(_) => return self.new_unspecified_float_ty_var(),
+                NumKind::UnspecifiedInt(_) => return self.s.new_unspecified_unsigned_int_ty_var(),
+                NumKind::UnspecifiedFloat(_) => return self.s.new_unspecified_float_ty_var(),
             },
         }
     }

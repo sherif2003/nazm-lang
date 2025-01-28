@@ -21,7 +21,6 @@ pub struct TypedAST {
     pub fns_signatures: HashMap<FnKey, Ty>,
     pub lets: HashMap<LetStmKey, LetStm>,
     pub exprs: HashMap<ExprKey, Ty>,
-    pub substitutions: TiVec<TypeVarKey, Ty>,
 }
 
 impl<T: Clone> RcCell<T> {

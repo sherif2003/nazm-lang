@@ -50,6 +50,7 @@ pub struct SemanticsAnalyzer<'a> {
     diagnostics: Vec<Diagnostic<'a>>,
     cycle_stack: Vec<Diagnostic<'a>>,
     current_file_key: FileKey,
+    s: Substitution,
 }
 
 impl<'a> SemanticsAnalyzer<'a> {
@@ -73,7 +74,6 @@ impl<'a> SemanticsAnalyzer<'a> {
                 fns_signatures: HashMap::with_capacity(ast.fns.len()),
                 lets: HashMap::with_capacity(ast.lets.len()),
                 exprs: HashMap::with_capacity(ast.exprs.len()),
-                substitutions: TiVec::new(),
             },
             ast,
             ..Default::default()
@@ -100,9 +100,10 @@ impl<'a> SemanticsAnalyzer<'a> {
             self.analyze_scope(_fn.scope_key);
         }
 
-        for ty_var in self.typed_ast.substitutions {
-            println!("{:#?}", ty_var.inner());
-            println!("-------------------------")
+        println!("Exprs types:");
+        println!("Len: {}", self.typed_ast.exprs.values().len());
+        for ty in self.typed_ast.exprs.values() {
+            println!("{}", self.fmt_ty(&ty))
         }
 
         if !self.diagnostics.is_empty() {
@@ -130,49 +131,38 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     fn analyze_scope(&mut self, scope_key: ScopeKey) {
         let stms = std::mem::take(&mut self.ast.scopes[scope_key].stms);
-        let mut s = Substitution::new();
 
         for stm in &stms {
             match stm {
                 Stm::Let(let_stm_key) => {
                     let let_stm_type = if let Some(expr_key) = self.ast.lets[*let_stm_key].assign {
-                        let (substitution, mut expr_ty) = self.infer(expr_key);
+                        let mut expr_ty = self.infer(expr_key);
 
                         let mut let_stm_type =
                             if let Some(type_expr_key) = self.ast.lets[*let_stm_key].binding.typ {
                                 self.analyze_type_expr(type_expr_key).0
                             } else {
-                                self.new_unknown_ty_var()
+                                self.s.new_unknown_ty_var()
                             };
 
                         println!("Let type: {:#?}", let_stm_type.inner());
 
-                        s += substitution;
-
                         let expr_span = self.ast.exprs[expr_key].span;
-
-                        expr_ty = s.apply(&expr_ty);
-                        let_stm_type = s.apply(&let_stm_type);
 
                         println!("Expr type: {:#?}", expr_ty.inner());
 
-                        match Substitution::unify(&let_stm_type, &expr_ty) {
-                            Ok(substitution) => {
-                                s += substitution;
-                            }
-                            Err(err) => {
-                                self.add_type_mismatch_err(&let_stm_type, &expr_ty, expr_span);
-                            }
+                        if let Err(err) = self.s.unify(&let_stm_type, &expr_ty) {
+                            self.add_type_mismatch_err(&let_stm_type, &expr_ty, expr_span);
                         }
 
-                        expr_ty = s.apply(&expr_ty);
-                        let_stm_type = s.apply(&let_stm_type);
+                        expr_ty = self.s.apply(&expr_ty);
+                        let_stm_type = self.s.apply(&let_stm_type);
 
                         println!("Expr inferred type: {:#?}", expr_ty.inner());
 
                         let_stm_type
                     } else {
-                        self.new_unknown_ty_var()
+                        self.s.new_unknown_ty_var()
                     };
 
                     println!("Let inferred type: {:#?}", let_stm_type.inner());
@@ -201,14 +191,14 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         self.ast.scopes[scope_key].stms = stms;
 
-        self.typed_ast.substitutions = self
-            .typed_ast
-            .substitutions
-            .keys()
-            .map(|ty_var_key| s.apply(&Ty::type_var(ty_var_key)))
-            .collect();
+        // self.typed_ast.substitutions = self
+        //     .typed_ast
+        //     .substitutions
+        //     .keys()
+        //     .map(|ty_var_key| self.s.apply(&Ty::type_var(ty_var_key)))
+        //     .collect();
 
-        println!("{:#?}\n!!!!!!!!!!!!!!!!!!!!\n", s)
+        // println!("{:#?}\n!!!!!!!!!!!!!!!!!!!!\n", self.s)
     }
 
     fn set_bindnig_ty(&mut self, let_stm_key: LetStmKey, kind: BindingKind, ty: &Ty) {
@@ -258,39 +248,12 @@ impl<'a> SemanticsAnalyzer<'a> {
         let mut tuple_types = ThinVec::with_capacity(kinds.len());
         for i in 0..kinds.len() {
             let kind = &kinds[i];
-            let ty = self.new_unknown_ty_var();
+            let ty = self.s.new_unknown_ty_var();
             self.set_bindnig_ty(let_stm_key, kind.clone(), &ty);
             tuple_types.push(ty);
         }
 
         Ty::tuple(tuple_types)
-    }
-
-    fn new_unknown_ty_var(&mut self) -> Ty {
-        let ty_var_key = self
-            .typed_ast
-            .substitutions
-            .push_and_get_key(Ty::new(Type::Unknown));
-
-        Ty::type_var(ty_var_key)
-    }
-
-    fn new_unspecified_unsigned_int_ty_var(&mut self) -> Ty {
-        let ty_var_key = self
-            .typed_ast
-            .substitutions
-            .push_and_get_key(Ty::new(Type::UnspecifiedUnsignedInt));
-
-        Ty::type_var(ty_var_key)
-    }
-
-    fn new_unspecified_float_ty_var(&mut self) -> Ty {
-        let ty_var_key = self
-            .typed_ast
-            .substitutions
-            .push_and_get_key(Ty::new(Type::UnspecifiedFloat));
-
-        Ty::type_var(ty_var_key)
     }
 
     fn add_type_mismatch_err(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
@@ -331,7 +294,15 @@ impl<'a> SemanticsAnalyzer<'a> {
             Type::UnspecifiedUnsignedInt => format!("{{عدد}}"),
             Type::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
             Type::UnspecifiedFloat => format!("{{عدد عشري}}"),
-            Type::TypeVar(_) => todo!(),
+            Type::TypeVar(ty_var_key) => {
+                let new_ty = &self.s.apply(ty);
+                if new_ty == ty {
+                    // format!("_{}", usize::from(ty_var_key))
+                    self.fmt_ty(&self.s.all_ty_vars[ty_var_key])
+                } else {
+                    self.fmt_ty(new_ty)
+                }
+            }
             Type::Slice(rc_cell) => format!("[{}]", self.fmt_ty(&rc_cell)),
             Type::Ptr(rc_cell) => format!("*{}", self.fmt_ty(&rc_cell)),
             Type::Ref(rc_cell) => format!("#{}", self.fmt_ty(&rc_cell)),
