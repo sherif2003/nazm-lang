@@ -168,13 +168,13 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let underlying_typ =
                     self.ast.types_exprs.slices[*slice_type_expr_key].underlying_typ;
                 let (type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
-                (Ty::new_concrete(ConcreteType::Slice(type_key)), -1, 0)
+                (Ty::slice(type_key), -1, 0)
             }
             TypeExpr::Ptr(ptr_type_expr_key) => {
                 let underlying_typ = self.ast.types_exprs.ptrs[*ptr_type_expr_key].underlying_typ;
                 let (underlying_type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
                 (
-                    Ty::new_concrete(ConcreteType::Ptr(underlying_type_key)),
+                    Ty::ptr(underlying_type_key),
                     Self::PTR_SIZE,
                     Self::PTR_SIZE as u8,
                 )
@@ -188,18 +188,14 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     (Self::PTR_SIZE, Self::PTR_SIZE as u8)
                 };
-                (
-                    Ty::new_concrete(ConcreteType::Ref(underlying_type_key)),
-                    size,
-                    align,
-                )
+                (Ty::reference(underlying_type_key), size, align)
             }
             TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
                 let underlying_typ =
                     self.ast.types_exprs.ptrs_mut[*ptr_mut_type_expr_key].underlying_typ;
                 let (underlying_type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
                 (
-                    Ty::new_concrete(ConcreteType::PtrMut(underlying_type_key)),
+                    Ty::ptr_mut(underlying_type_key),
                     Self::PTR_SIZE,
                     Self::PTR_SIZE as u8,
                 )
@@ -214,11 +210,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     (Self::PTR_SIZE, Self::PTR_SIZE as u8)
                 };
-                (
-                    Ty::new_concrete(ConcreteType::RefMut(underlying_type_key)),
-                    size,
-                    align,
-                )
+                (Ty::ref_mut(underlying_type_key), size, align)
             }
         }
     }
@@ -233,7 +225,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.analyze_tuple_struct(key);
                 let s = self.typed_ast.tuple_structs.get(&key).unwrap();
                 (
-                    Ty::new_concrete(ConcreteType::TupleStruct(key)),
+                    Ty::new(Type::Concrete(ConcreteType::TupleStruct(key))),
                     s.size as i32,
                     s.align,
                 )
@@ -244,7 +236,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let s = self.typed_ast.fields_structs.get(&key).unwrap();
 
                 (
-                    Ty::new_concrete(ConcreteType::FieldsStruct(key)),
+                    Ty::new(Type::Concrete(ConcreteType::FieldsStruct(key))),
                     s.size as i32,
                     s.align,
                 )
@@ -258,33 +250,33 @@ impl<'a> SemanticsAnalyzer<'a> {
         let info = &self.ast.unit_structs[key].info;
         let file_path = &self.files_infos[info.file_key].path;
         if file_path != "أساسي.نظم" {
-            return (Ty::new_concrete(ConcreteType::UnitStruct(key)), 0, 0);
+            return (Ty::new(Type::Concrete(ConcreteType::UnitStruct(key))), 0, 0);
         }
 
         match info.id_key {
             IdKey::I_TYPE => (
-                Ty::new_concrete(ConcreteType::I),
+                Ty::new(Type::Concrete(ConcreteType::I)),
                 Self::PTR_SIZE,
                 Self::PTR_SIZE as u8,
             ),
-            IdKey::I1_TYPE => (Ty::new_concrete(ConcreteType::I1), 1, 1),
-            IdKey::I2_TYPE => (Ty::new_concrete(ConcreteType::I2), 2, 2),
-            IdKey::I4_TYPE => (Ty::new_concrete(ConcreteType::I4), 4, 4),
-            IdKey::I8_TYPE => (Ty::new_concrete(ConcreteType::I8), 8, 8),
+            IdKey::I1_TYPE => (Ty::new(Type::Concrete(ConcreteType::I1)), 1, 1),
+            IdKey::I2_TYPE => (Ty::new(Type::Concrete(ConcreteType::I2)), 2, 2),
+            IdKey::I4_TYPE => (Ty::new(Type::Concrete(ConcreteType::I4)), 4, 4),
+            IdKey::I8_TYPE => (Ty::new(Type::Concrete(ConcreteType::I8)), 8, 8),
             IdKey::U_TYPE => (
-                Ty::new_concrete(ConcreteType::U),
+                Ty::new(Type::Concrete(ConcreteType::U)),
                 Self::PTR_SIZE,
                 Self::PTR_SIZE as u8,
             ),
-            IdKey::U1_TYPE => (Ty::new_concrete(ConcreteType::U1), 1, 1),
-            IdKey::U2_TYPE => (Ty::new_concrete(ConcreteType::U2), 2, 2),
-            IdKey::U4_TYPE => (Ty::new_concrete(ConcreteType::U4), 4, 4),
-            IdKey::U8_TYPE => (Ty::new_concrete(ConcreteType::U8), 8, 8),
-            IdKey::F4_TYPE => (Ty::new_concrete(ConcreteType::F4), 4, 4),
-            IdKey::F8_TYPE => (Ty::new_concrete(ConcreteType::F8), 8, 8),
-            IdKey::BOOL_TYPE => (Ty::new_concrete(ConcreteType::Bool), 1, 1),
-            IdKey::CHAR_TYPE => (Ty::new_concrete(ConcreteType::Char), 4, 4),
-            IdKey::STR_TYPE => (Ty::new_concrete(ConcreteType::Str), -1, 0),
+            IdKey::U1_TYPE => (Ty::new(Type::Concrete(ConcreteType::U1)), 1, 1),
+            IdKey::U2_TYPE => (Ty::new(Type::Concrete(ConcreteType::U2)), 2, 2),
+            IdKey::U4_TYPE => (Ty::new(Type::Concrete(ConcreteType::U4)), 4, 4),
+            IdKey::U8_TYPE => (Ty::new(Type::Concrete(ConcreteType::U8)), 8, 8),
+            IdKey::F4_TYPE => (Ty::new(Type::Concrete(ConcreteType::F4)), 4, 4),
+            IdKey::F8_TYPE => (Ty::new(Type::Concrete(ConcreteType::F8)), 8, 8),
+            IdKey::BOOL_TYPE => (Ty::new(Type::Concrete(ConcreteType::Bool)), 1, 1),
+            IdKey::CHAR_TYPE => (Ty::new(Type::Concrete(ConcreteType::Char)), 4, 4),
+            IdKey::STR_TYPE => (Ty::new(Type::Concrete(ConcreteType::Str)), -1, 0),
             _ => unreachable!(),
         }
     }
@@ -421,6 +413,11 @@ impl<'a> SemanticsAnalyzer<'a> {
     #[inline]
     fn analyze_tuple(&mut self, key: TupleTypeExprKey) -> (Ty, i32, u8) {
         let types_len = self.ast.types_exprs.tuples[key].types.len();
+
+        if types_len == 0 {
+            return (Ty::new(Type::Concrete(ConcreteType::Unit)), 0, 0);
+        }
+
         let mut types = ThinVec::with_capacity(types_len);
         let mut max_align = 0;
         let mut offset: u32 = 0;
@@ -450,11 +447,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         // TODO: Reorder types
 
-        (
-            Ty::new_concrete(ConcreteType::Tuple(TupleType { types })),
-            offset as i32,
-            max_align,
-        )
+        (Ty::tuple(types), offset as i32, max_align)
     }
 
     #[inline]
@@ -483,12 +476,85 @@ impl<'a> SemanticsAnalyzer<'a> {
             .0;
 
         (
-            Ty::new_concrete(ConcreteType::Lambda(LambdaType {
-                params_types,
-                return_type,
-            })),
+            Ty::lambda(params_types, return_type),
             Self::PTR_SIZE,
             Self::PTR_SIZE as u8,
         )
     }
 }
+
+// fn bind_type_var(&mut self, var_key: TypeVarKey, ty: Ty) -> Result<(), String> {
+//     // Check for cyclic references
+//     if ty.inner().contains_var(var_key) {
+//         return Err(format!(
+//             "Cyclic type detected: TypeVarKey({:?}) occurs in {:?}",
+//             var_key, ty
+//         ));
+//     }
+
+//     println!("Inner {:#?}", ty.inner().clone());
+//     println!("Substitution {:#?}", self.substitutions[var_key]);
+//     println!("~~~~~~~~~~~~~");
+
+//     // Update substitutions
+//     let substitution = &self.substitutions[var_key];
+
+//     match substitution {
+//         Type::Unknown => {
+//             let inner = ty.inner().clone();
+//             self.substitutions[var_key] = inner;
+//         }
+//         Type::UnspecifiedUnsignedInt => {
+//             let inner = ty.inner().clone();
+//             match inner {
+//                 Type::UnspecifiedUnsignedInt
+//                 | Type::UnspecifiedSignedInt
+//                 | Type::Concrete(ConcreteType::I)
+//                 | Type::Concrete(ConcreteType::I1)
+//                 | Type::Concrete(ConcreteType::I2)
+//                 | Type::Concrete(ConcreteType::I4)
+//                 | Type::Concrete(ConcreteType::I8)
+//                 | Type::Concrete(ConcreteType::U)
+//                 | Type::Concrete(ConcreteType::U1)
+//                 | Type::Concrete(ConcreteType::U2)
+//                 | Type::Concrete(ConcreteType::U4)
+//                 | Type::Concrete(ConcreteType::U8) => {
+//                     self.substitutions[var_key] = inner;
+//                 }
+//                 Type::TypeVar(type_var_key) => todo!(),
+//                 _ => return Err("Type mismatch".to_owned()),
+//             }
+//         }
+//         Type::UnspecifiedSignedInt => {
+//             let inner = ty.inner().clone();
+//             match inner {
+//                 Type::UnspecifiedSignedInt
+//                 | Type::Concrete(ConcreteType::I)
+//                 | Type::Concrete(ConcreteType::I1)
+//                 | Type::Concrete(ConcreteType::I2)
+//                 | Type::Concrete(ConcreteType::I4)
+//                 | Type::Concrete(ConcreteType::I8) => {
+//                     self.substitutions[var_key] = inner;
+//                 }
+//                 Type::TypeVar(type_var_key) => todo!(),
+//                 _ => return Err("Type mismatch".to_owned()),
+//             }
+//         }
+//         Type::UnspecifiedFloat => {
+//             let inner = ty.inner().clone();
+//             match inner {
+//                 Type::UnspecifiedFloat
+//                 | Type::Concrete(ConcreteType::F4)
+//                 | Type::Concrete(ConcreteType::F8) => {
+//                     self.substitutions[var_key] = inner;
+//                 }
+//                 Type::TypeVar(type_var_key) => todo!(),
+//                 _ => return Err("Type mismatch".to_owned()),
+//             }
+//         }
+//         Type::TypeVar(type_var_key) => todo!(),
+//         Type::Concrete(concrete_type) => todo!(),
+//     }
+//     println!("Substitution inferred {:#?}", self.substitutions[var_key]);
+//     Ok(())
+// }

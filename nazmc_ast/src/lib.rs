@@ -197,19 +197,19 @@ pub struct ImportStm {
     pub alias: ASTId,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct ASTId {
     pub span: Span,
     pub id: IdKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Binding {
     pub kind: BindingKind,
     pub typ: Option<TypeExprKey>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BindingKind {
     Id(ASTId),
     MutId { id: ASTId, mut_span: Span },
@@ -347,7 +347,7 @@ pub struct Expr {
     pub kind: ExprKind,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub enum ExprKind {
     #[default]
     Unit,
@@ -374,7 +374,7 @@ pub enum ExprKind {
     On,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum LiteralExpr {
     Str(StrKey),
     Char(char),
@@ -382,7 +382,7 @@ pub enum LiteralExpr {
     Num(NumKind),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum NumKind {
     F4(f32),
     F8(f64),
@@ -400,72 +400,72 @@ pub enum NumKind {
     UnspecifiedFloat(f64),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CallExpr {
     pub on: ExprKey,
     pub args: ThinVec<ExprKey>,
     pub parens_span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TupleStructExpr {
     pub path_key: TupleStructPathKey,
     pub args: ThinVec<ExprKey>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FieldsStructExpr {
     pub path_key: FieldsStructPathKey,
     pub fields: ThinVec<(ASTId, ExprKey)>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FieldExpr {
     pub on: ExprKey,
     pub name: ASTId,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TupleIdxExpr {
     pub on: ExprKey,
     pub idx: usize,
     pub idx_span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IdxExpr {
     pub on: ExprKey,
     pub idx: ExprKey,
     pub brackets_span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ArrayElementsSizedExpr {
     pub repeat: ExprKey,
     pub size: ExprKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IfExpr {
     pub if_: (ExprKey, ScopeKey),
     pub else_ifs: ThinVec<(ExprKey, ScopeKey)>,
     pub else_: Option<ScopeKey>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LambdaExpr {
     pub params: ThinVec<Binding>,
     pub body: ScopeKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UnaryOpExpr {
     pub op: UnaryOp,
     pub op_span: Span,
     pub expr: ExprKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum UnaryOp {
     Minus,
     LNot,
@@ -475,7 +475,7 @@ pub enum UnaryOp {
     BorrowMut,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BinaryOpExpr {
     pub op: BinOp,
     pub op_span_cursor: SpanCursor,
@@ -483,7 +483,7 @@ pub struct BinaryOpExpr {
     pub right: ExprKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BinOp {
     LOr,
     LAnd,

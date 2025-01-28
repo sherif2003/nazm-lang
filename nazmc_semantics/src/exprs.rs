@@ -1,259 +1,162 @@
-use std::vec;
-
-use nazmc_ast::ExprKey;
-use thin_vec::ThinVec;
-
-use crate::{
-    typed_ast::{ConcreteType, InfTy, InferredType, TupleType, Ty, Type},
-    SemanticsAnalyzer,
-};
+use crate::{type_infer::Substitution, *};
 
 impl<'a> SemanticsAnalyzer<'a> {
-    pub(crate) fn infer_expr(&mut self, expected_ty: &Ty, expr_key: ExprKey) {
-        // Take the ownership (good for vectors as in ExprKind::ArrayElemnts) instead of cloning, then restoring it
-        let kind = std::mem::take(&mut self.ast.exprs[expr_key].kind);
+    pub(crate) fn infer(&mut self, expr_key: ExprKey) -> (Substitution, Ty) {
         let expr_span = self.ast.exprs[expr_key].span;
 
-        let kind = match kind {
-            nazmc_ast::ExprKind::Unit => {
-                // let found_ty = Ty::new(Type::Unit);
-                // self.unify(expected_ty, &found_ty, expr_span);
-                nazmc_ast::ExprKind::Unit
+        let (substitution, ty) = match &self.ast.exprs[expr_key].kind {
+            ExprKind::Unit => (Substitution::new(), Ty::unit()),
+            ExprKind::Literal(lit_expr) => (Substitution::new(), self.infer_lit_expr(*lit_expr)),
+            ExprKind::PathNoPkg(path_no_pkg_key) => (
+                Substitution::new(),
+                self.infer_path_no_pkg_expr(*path_no_pkg_key),
+            ),
+            ExprKind::PathInPkg(path_with_pkg_key) => (
+                Substitution::new(),
+                self.infer_path_with_pkg_expr(*path_with_pkg_key),
+            ),
+            ExprKind::UnitStruct(unit_struct_path_key) => {
+                let key = self.ast.state.unit_structs_paths_exprs[*unit_struct_path_key];
+                (Substitution::new(), Ty::unit_struct(key))
             }
-            nazmc_ast::ExprKind::Literal(lit_expr) => {
-                // self.infer_lit_expr(expected_ty, &lit_expr, expr_span);
-                nazmc_ast::ExprKind::Literal(lit_expr)
-            }
-            nazmc_ast::ExprKind::PathNoPkg(path_no_pkg_key) => {
-                let item = self.ast.state.paths_no_pkgs_exprs[path_no_pkg_key];
+            ExprKind::Call(call_expr) => {
+                let CallExpr {
+                    on,
+                    args,
+                    parens_span,
+                } = call_expr.as_ref();
 
-                match item {
-                    nazmc_ast::Item::Const { vis, key } => todo!(),
-                    nazmc_ast::Item::Static { vis, key } => todo!(),
-                    nazmc_ast::Item::Fn { vis, key } => todo!(),
-                    nazmc_ast::Item::LocalVar { id, key } => {
-                        let found_ty = self
-                            .typed_ast
-                            .lets
-                            .get(&key)
-                            .unwrap()
-                            .bindings
-                            .get(&id)
-                            .unwrap()
-                            .clone();
-                        self.unify(expected_ty, &found_ty, expr_span);
+                let on = *on;
+                let parens_span = *parens_span;
+                let args_len = args.len();
+
+                let (s, mut on_expr_ty) = self.infer(on);
+                on_expr_ty = s.apply(&on_expr_ty);
+
+                match on_expr_ty.inner() {
+                    Type::Lambda(LambdaType {
+                        params_types,
+                        return_type,
+                    })
+                    | Type::FnPtr(FnPtrType {
+                        params_types,
+                        return_type,
+                    }) => {
+                        if params_types.len() == args_len {
+                            for i in 0..args_len {}
+                        } else {
+                        }
                     }
-                    _ => unreachable!(),
+                    Type::TypeVar(ty_var_key) => {}
+                    _ => {
+                        let non_callable_span = self.ast.exprs[on].span;
+                        self.add_calling_non_callable_err(
+                            &on_expr_ty,
+                            non_callable_span,
+                            parens_span,
+                        );
+                    }
                 }
 
-                nazmc_ast::ExprKind::PathNoPkg(path_no_pkg_key)
+                todo!()
             }
-            nazmc_ast::ExprKind::PathInPkg(path_with_pkg_key) => todo!(),
-            nazmc_ast::ExprKind::Call(call_expr) => todo!(),
-            nazmc_ast::ExprKind::UnitStruct(unit_struct_path_key) => todo!(),
-            nazmc_ast::ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
-            nazmc_ast::ExprKind::FieldsStruct(fields_struct_expr) => todo!(),
-            nazmc_ast::ExprKind::Field(field_expr) => todo!(),
-            nazmc_ast::ExprKind::Idx(idx_expr) => todo!(),
-            nazmc_ast::ExprKind::TupleIdx(tuple_idx_expr) => todo!(),
-            nazmc_ast::ExprKind::Tuple(exprs) => {
-                // self.infer_tuple_expr(expected_ty, &exprs, expr_span);
-                nazmc_ast::ExprKind::Tuple(exprs)
-            }
-            nazmc_ast::ExprKind::ArrayElemnts(thin_vec) => todo!(),
-            nazmc_ast::ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
-            nazmc_ast::ExprKind::If(if_expr) => todo!(),
-            nazmc_ast::ExprKind::Lambda(lambda_expr) => todo!(),
-            nazmc_ast::ExprKind::UnaryOp(unary_op_expr) => todo!(),
-            nazmc_ast::ExprKind::BinaryOp(binary_op_expr) => todo!(),
-            nazmc_ast::ExprKind::Return(expr_key) => todo!(),
-            nazmc_ast::ExprKind::Break(expr_key) => todo!(),
-            nazmc_ast::ExprKind::Continue => todo!(),
-            nazmc_ast::ExprKind::On => todo!(),
+            ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
+            ExprKind::FieldsStruct(fields_struct_expr) => todo!(),
+            ExprKind::Field(field_expr) => todo!(),
+            ExprKind::Idx(idx_expr) => todo!(),
+            ExprKind::TupleIdx(tuple_idx_expr) => todo!(),
+            ExprKind::Tuple(thin_vec) => todo!(),
+            ExprKind::ArrayElemnts(thin_vec) => todo!(),
+            ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
+            ExprKind::If(if_expr) => todo!(),
+            ExprKind::Lambda(lambda_expr) => todo!(),
+            ExprKind::UnaryOp(unary_op_expr) => todo!(),
+            ExprKind::BinaryOp(binary_op_expr) => todo!(),
+            ExprKind::Return(expr_key) => todo!(),
+            ExprKind::Break(expr_key) => todo!(),
+            ExprKind::Continue => todo!(),
+            ExprKind::On => todo!(),
         };
 
-        // Restore the ownership
-        self.ast.exprs[expr_key].kind = kind;
+        self.typed_ast.exprs.insert(expr_key, ty.clone());
 
-        self.typed_ast.exprs.insert(expr_key, expected_ty.clone());
+        (substitution, ty)
     }
 
-    // fn infer_lit_expr(&mut self, expected_ty: &Ty, lit_expr: &LiteralExpr, expr_span: Span) {
-    //     let found_ty = Ty::new(match lit_expr {
-    //         LiteralExpr::Str(_) => Type::Ref(Ty::new(Type::Str)),
-    //         LiteralExpr::Char(_) => Type::Char,
-    //         LiteralExpr::Bool(_) => Type::Bool,
-    //         LiteralExpr::Num(num_kind) => match num_kind {
-    //             nazmc_ast::NumKind::F4(_) => Type::F4,
-    //             nazmc_ast::NumKind::F8(_) => Type::F8,
-    //             nazmc_ast::NumKind::I(_) => Type::I,
-    //             nazmc_ast::NumKind::I1(_) => Type::I1,
-    //             nazmc_ast::NumKind::I2(_) => Type::I2,
-    //             nazmc_ast::NumKind::I4(_) => Type::I4,
-    //             nazmc_ast::NumKind::I8(_) => Type::I8,
-    //             nazmc_ast::NumKind::U(_) => Type::U,
-    //             nazmc_ast::NumKind::U1(_) => Type::U1,
-    //             nazmc_ast::NumKind::U2(_) => Type::U2,
-    //             nazmc_ast::NumKind::U4(_) => Type::U4,
-    //             nazmc_ast::NumKind::U8(_) => Type::U8,
-    //             nazmc_ast::NumKind::UnspecifiedInt(_) => new_unspecified_unsigned_int_ty().inner(),
-    //             nazmc_ast::NumKind::UnspecifiedFloat(_) => new_unspecified_float_ty().inner(),
-    //         },
-    //     });
+    fn infer_lit_expr(&mut self, lit_expr: LiteralExpr) -> Ty {
+        match lit_expr {
+            LiteralExpr::Str(_) => Ty::reference(Ty::string()),
+            LiteralExpr::Char(_) => Ty::character(),
+            LiteralExpr::Bool(_) => Ty::boolean(),
+            LiteralExpr::Num(num_kind) => match num_kind {
+                NumKind::F4(_) => Ty::f4(),
+                NumKind::F8(_) => Ty::f8(),
+                NumKind::I(_) => Ty::i(),
+                NumKind::I1(_) => Ty::i1(),
+                NumKind::I2(_) => Ty::i2(),
+                NumKind::I4(_) => Ty::i4(),
+                NumKind::I8(_) => Ty::i8(),
+                NumKind::U(_) => Ty::u(),
+                NumKind::U1(_) => Ty::u1(),
+                NumKind::U2(_) => Ty::u2(),
+                NumKind::U4(_) => Ty::u4(),
+                NumKind::U8(_) => Ty::u8(),
+                NumKind::UnspecifiedInt(_) => return self.new_unspecified_unsigned_int_ty_var(),
+                NumKind::UnspecifiedFloat(_) => return self.new_unspecified_float_ty_var(),
+            },
+        }
+    }
 
-    //     self.unify(expected_ty, &found_ty, expr_span);
-    // }
+    fn infer_path_no_pkg_expr(&mut self, path_no_pkg_key: PathNoPkgKey) -> Ty {
+        let item = self.ast.state.paths_no_pkgs_exprs[path_no_pkg_key];
 
-    // fn infer_tuple_expr(&mut self, expected_ty: &Ty, exprs: &[ExprKey], expr_span: Span) {
-    //     let inner = expected_ty.inner();
-    //     if let Type::Tuple(TupleType { types }) = inner {
-    //         if types.len() == exprs.len() {
-    //             for i in 0..exprs.len() {
-    //                 let expr_key = exprs[i];
-    //                 self.infer_expr(&types[i], expr_key);
-    //             }
-    //         } else {
-    //             let found_ty = self.infer_tuple_expr_with_unknown(exprs);
-    //             self.add_type_mismatch_err(expected_ty, &found_ty, expr_span);
-    //         }
-    //     } else {
-    //         let found_ty = self.infer_tuple_expr_with_unknown(exprs);
-    //         self.unify(expected_ty, &found_ty, expr_span);
-    //     }
-    // }
-    //
-    // fn infer_tuple_expr_with_unknown(&mut self, exprs: &[ExprKey]) -> Ty {
-    //     let mut tuple_types = ThinVec::with_capacity(exprs.len());
+        let typ = match item {
+            Item::Const { vis, key } => todo!(),
+            Item::Static { vis, key } => todo!(),
+            Item::Fn { vis, key } => &self.typed_ast.fns_signatures[&key],
+            Item::LocalVar { id, key } => self
+                .typed_ast
+                .lets
+                .get(&key)
+                .unwrap()
+                .bindings
+                .get(&id)
+                .unwrap(),
+            _ => unreachable!(),
+        };
 
-    //     for i in 0..exprs.len() {
-    //         let expr_key = exprs[i];
-    //         tuple_types.push(Ty::new(Type::Infered(InfTy::new(InferedType::Unknown))));
-    //         self.infer_expr(&tuple_types[i], expr_key);
-    //     }
+        typ.clone()
+    }
 
-    //     Ty::new_concrete(ConcreteType::Tuple(TupleType { types: tuple_types }))
-    // }
-    //
-    // pub(crate) fn analyze_expr(&mut self, expr_key: ExprKey) -> Ty {
-    //     // Take the ownership (good for vectors as in ExprKind::ArrayElemnts) instead of cloning, then restoring it
-    //     let kind = std::mem::take(&mut self.ast.exprs[expr_key].kind);
+    fn infer_path_with_pkg_expr(&mut self, path_with_pkg_key: PathWithPkgKey) -> Ty {
+        let item = self.ast.state.paths_with_pkgs_exprs[path_with_pkg_key];
 
-    //     let (kind, typ) = match kind {
-    //         kind @ nazmc_ast::ExprKind::Return(expr_key)
-    //         | kind @ nazmc_ast::ExprKind::Break(expr_key) => {
-    //             if let Some(expr_key) = expr_key {
-    //                 self.analyze_expr(expr_key);
-    //             }
-    //             (kind, Type::Never)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Continue => (kind, Type::Never),
-    //         kind @ nazmc_ast::ExprKind::On => todo!(),
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Str(_)) => {
-    //             (kind, Type::Ref(Ty::new(Type::Str)))
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(
-    //             nazmc_ast::NumKind::UnspecifiedInt(_),
-    //         )) => (kind, Type::UnspecifiedUnsignedInt),
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(
-    //             nazmc_ast::NumKind::UnspecifiedFloat(_),
-    //         )) => (kind, Type::UnspecifiedFloat),
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::I(_))) => {
-    //             (kind, Type::I)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::I1(_))) => {
-    //             (kind, Type::I1)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::I2(_))) => {
-    //             (kind, Type::I2)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::I4(_))) => {
-    //             (kind, Type::I4)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::I8(_))) => {
-    //             (kind, Type::I8)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::U(_))) => {
-    //             (kind, Type::U)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::U1(_))) => {
-    //             (kind, Type::U1)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::U2(_))) => {
-    //             (kind, Type::U2)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::U4(_))) => {
-    //             (kind, Type::U4)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::U8(_))) => {
-    //             (kind, Type::U8)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::F4(_))) => {
-    //             (kind, Type::F4)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Num(nazmc_ast::NumKind::F8(_))) => {
-    //             (kind, Type::F8)
-    //         }
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Bool(_)) => (kind, Type::Bool),
-    //         kind @ nazmc_ast::ExprKind::Literal(LiteralExpr::Char(_)) => (kind, Type::Char),
-    //         kind @ nazmc_ast::ExprKind::Unit => (kind, Type::Unit),
-    //         nazmc_ast::ExprKind::ArrayElemnts(array_elements) => {
-    //             let array_type_key = self.analyze_array_elements(&array_elements);
-    //             (
-    //                 nazmc_ast::ExprKind::ArrayElemnts(array_elements),
-    //                 Type::Array(array_type_key),
-    //             )
-    //         }
-    //         nazmc_ast::ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
+        let typ: &Ty = match item {
+            Item::Const { vis, key } => todo!(),
+            Item::Static { vis, key } => todo!(),
+            Item::Fn { vis, key } => &self.typed_ast.fns_signatures[&key],
+            _ => unreachable!(),
+        };
 
-    //         nazmc_ast::ExprKind::PathNoPkg(path_no_pkg_key) => todo!(),
-    //         nazmc_ast::ExprKind::PathInPkg(path_with_pkg_key) => todo!(),
-    //         nazmc_ast::ExprKind::Call(call_expr) => todo!(),
-    //         nazmc_ast::ExprKind::UnitStruct(unit_struct_path_key) => todo!(),
-    //         nazmc_ast::ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
-    //         nazmc_ast::ExprKind::FieldsStruct(fields_struct_expr) => todo!(),
-    //         nazmc_ast::ExprKind::Field(field_expr) => todo!(),
-    //         nazmc_ast::ExprKind::Idx(idx_expr) => todo!(),
-    //         nazmc_ast::ExprKind::TupleIdx(tuple_idx_expr) => todo!(),
-    //         nazmc_ast::ExprKind::Tuple(thin_vec) => todo!(),
-    //         nazmc_ast::ExprKind::If(if_expr) => todo!(),
-    //         nazmc_ast::ExprKind::Lambda(lambda_expr) => todo!(),
-    //         nazmc_ast::ExprKind::UnaryOp(unary_op_expr) => todo!(),
-    //         nazmc_ast::ExprKind::BinaryOp(binary_op_expr) => todo!(),
-    //     };
+        typ.clone()
+    }
 
-    //     // Restore the ownership
-    //     self.ast.exprs[expr_key].kind = kind;
-
-    //     Ty::new(typ)
-    // }
-
-    // fn analyze_array_elements(&mut self, array_elements: &[ExprKey]) -> ArrayType {
-    //     let size = array_elements.len() as u32;
-
-    //     let first_expr_span = array_elements
-    //         .first()
-    //         .map(|expr_key| self.ast.exprs[*expr_key].span);
-
-    //     let underlying_typ = Ty::new(Type::Unknown);
-
-    //     for expr_key in array_elements {
-    //         let expr_typ = self.analyze_expr(*expr_key);
-
-    //         if self.is_subtype_of(&underlying_typ, &expr_typ) {
-    //             continue;
-    //         }
-
-    //         let first_expr_span = first_expr_span.unwrap();
-    //         let expr_span = self.ast.exprs[*expr_key].span;
-
-    //         let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![]);
-    //         self.diagnostics.push(diagnostic);
-    //         break;
-    //     }
-
-    //     ArrayType {
-    //         underlying_typ,
-    //         size,
-    //     }
-    // }
+    fn add_calling_non_callable_err(
+        &mut self,
+        non_callable_ty: &Ty,
+        non_callable_span: Span,
+        parens_span: Span,
+    ) {
+        let msg = format!("");
+        let label1 = format!("يجب أن يكون دالة أو تعبير لامدا");
+        let label2 = format!("ولكنه من النوع `{}`", self.fmt_ty(non_callable_ty));
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            non_callable_span.start,
+        );
+        code_window.mark_secondary(non_callable_span, vec![label1, label2]);
+        code_window.mark_error(parens_span, vec![]);
+        let diagnostic = Diagnostic::error(msg, vec![code_window]);
+        self.diagnostics.push(diagnostic);
+    }
 }
