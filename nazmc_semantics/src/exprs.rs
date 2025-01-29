@@ -28,7 +28,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             ExprKind::BinaryOp(binary_op_expr) => todo!(),
             ExprKind::Return(expr_key) => todo!(),
             ExprKind::Break(expr_key) => todo!(),
-            ExprKind::Continue => todo!(),
+            ExprKind::Continue => self.s.new_never_ty_var(),
             ExprKind::On => todo!(),
         };
 
@@ -120,6 +120,17 @@ impl<'a> SemanticsAnalyzer<'a> {
         }) = on_expr_ty.inner()
         {
             (params_types, return_type, false)
+        } else if let Type::TypeVar(_) = on_expr_ty.inner() {
+            let params_types = args
+                .iter()
+                .map(|_| self.s.new_unknown_ty_var())
+                .collect::<ThinVec<_>>();
+            let return_type = self.s.new_unknown_ty_var();
+            let new_ty_var = self
+                .s
+                .new_callable_ty_var(params_types.clone(), return_type.clone());
+            let _ = self.s.unify(&on_expr_ty, &new_ty_var);
+            (params_types, return_type, true)
         } else {
             let non_callable_span = self.ast.exprs[on].span;
             self.add_calling_non_callable_err(&on_expr_ty, non_callable_span, parens_span);

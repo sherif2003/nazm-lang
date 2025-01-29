@@ -22,6 +22,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn fmt_ty(&self, ty: &Ty) -> String {
         match ty.inner() {
             Type::Unknown => format!("_"),
+            Type::Never => format!("!!"),
             Type::UnspecifiedUnsignedInt => format!("{{عدد}}"),
             Type::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
             Type::UnspecifiedFloat => format!("{{عدد عشري}}"),
@@ -65,7 +66,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .join("، "),
                 self.fmt_ty(&lambda_type.return_type)
             ),
-            Type::FnPtr(fn_ptr_type) => format!(
+            Type::FnPtr(fn_ptr_type) | Type::Callable(fn_ptr_type) => format!(
                 "دالة({}) -> {}",
                 fn_ptr_type
                     .params_types
@@ -81,7 +82,6 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn fmt_con_ty(&self, con_ty: &ConcreteType) -> String {
         match con_ty {
-            ConcreteType::Never => format!("!!"),
             ConcreteType::Unit => format!("()"),
             ConcreteType::I => format!("ص"),
             ConcreteType::I1 => format!("ص1"),

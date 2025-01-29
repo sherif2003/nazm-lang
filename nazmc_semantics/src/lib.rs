@@ -5,10 +5,7 @@ mod type_infer;
 mod typed_ast;
 mod types;
 
-use nazmc_data_pool::{
-    typed_index_collections::{ti_vec, TiSlice, TiVec},
-    DataPoolBuilder, IdKey,
-};
+use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
 
 pub(crate) use nazmc_ast::*;
 use nazmc_diagnostics::{
@@ -18,8 +15,7 @@ use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
 use type_infer::Substitution;
 use typed_ast::{
-    ArrayType, ConTy, ConcreteType, FnPtrType, LambdaType, LetStm, TupleType, Ty, Type, TypeVarKey,
-    TypedAST,
+    ConcreteType, FnPtrType, LambdaType, LetStm, TupleType, Ty, Type, TypeVarKey, TypedAST,
 };
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -103,8 +99,12 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         println!("Exprs types:");
         println!("Len: {}", self.typed_ast.exprs.values().len());
-        for ty in self.typed_ast.exprs.values() {
-            println!("{}", self.fmt_ty(&ty))
+        for (key, ty) in &self.typed_ast.exprs {
+            println!(
+                "Key: {:?}, Ty: {}",
+                self.ast.exprs[*key].kind,
+                self.fmt_ty(&ty)
+            )
         }
 
         if !self.diagnostics.is_empty() {

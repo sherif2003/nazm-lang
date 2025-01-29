@@ -16,35 +16,55 @@ pub enum TypeUnificationErr {
 }
 
 impl Substitution {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    pub fn new_unknown_ty_var(&mut self) -> Ty {
+    pub(crate) fn new_unknown_ty_var(&mut self) -> Ty {
         let ty_var_key = self.all_ty_vars.push_and_get_key(Ty::new(Type::Unknown));
         Ty::type_var(ty_var_key)
     }
 
-    pub fn new_unspecified_unsigned_int_ty_var(&mut self) -> Ty {
+    pub(crate) fn new_never_ty_var(&mut self) -> Ty {
+        let ty_var_key = self.all_ty_vars.push_and_get_key(Ty::new(Type::Never));
+        Ty::type_var(ty_var_key)
+    }
+
+    pub(crate) fn new_unspecified_unsigned_int_ty_var(&mut self) -> Ty {
         let ty_var_key = self
             .all_ty_vars
             .push_and_get_key(Ty::new(Type::UnspecifiedUnsignedInt));
         Ty::type_var(ty_var_key)
     }
 
-    pub fn new_unspecified_float_ty_var(&mut self) -> Ty {
+    pub(crate) fn new_unspecified_float_ty_var(&mut self) -> Ty {
         let ty_var_key = self
             .all_ty_vars
             .push_and_get_key(Ty::new(Type::UnspecifiedFloat));
         Ty::type_var(ty_var_key)
     }
 
+    pub(crate) fn new_callable_ty_var(
+        &mut self,
+        params: impl IntoIterator<Item = Ty>,
+        return_type: Ty,
+    ) -> Ty {
+        let ty_var_key = self
+            .all_ty_vars
+            .push_and_get_key(Ty::new(Type::Callable(FnPtrType {
+                params_types: params.into_iter().collect(),
+                return_type,
+            })));
+        Ty::type_var(ty_var_key)
+    }
+
     /// Apply substitutions to a type, recursively replacing type variables
     /// with their substituted types, if present in the substitution map.
-    pub fn apply(&self, ty: &Ty) -> Ty {
+    pub(crate) fn apply(&self, ty: &Ty) -> Ty {
         match &*ty.borrow() {
             // No substitution for unknown types
             Type::Unknown
+            | Type::Never
             | Type::UnspecifiedUnsignedInt
             | Type::UnspecifiedSignedInt
             | Type::UnspecifiedFloat
@@ -89,10 +109,18 @@ impl Substitution {
                     .map(|param| self.apply(param)),
                 self.apply(&fn_ptr_type.return_type),
             ),
+
+            Type::Callable(fn_ptr_type) => Ty::callable(
+                fn_ptr_type
+                    .params_types
+                    .iter()
+                    .map(|param| self.apply(param)),
+                self.apply(&fn_ptr_type.return_type),
+            ),
         }
     }
 
-    pub fn unify(&mut self, t1: &Ty, t2: &Ty) -> Result<(), TypeUnificationErr> {
+    pub(crate) fn unify(&mut self, t1: &Ty, t2: &Ty) -> Result<(), TypeUnificationErr> {
         let t1 = self.apply(t1);
         let t2 = self.apply(t2);
 
@@ -175,7 +203,11 @@ impl Substitution {
         }
     }
 
-    fn bind_type_var(&mut self, ty_var_key: TypeVarKey, ty: &Ty) -> Result<(), TypeUnificationErr> {
+    pub(crate) fn bind_type_var(
+        &mut self,
+        ty_var_key: TypeVarKey,
+        ty: &Ty,
+    ) -> Result<(), TypeUnificationErr> {
         // Check for cyclic references
         if ty.inner().contains_var(ty_var_key) {
             return Err(TypeUnificationErr::CycleDetected {
@@ -185,7 +217,7 @@ impl Substitution {
         }
 
         match self.all_ty_vars[ty_var_key].inner() {
-            Type::Unknown => {
+            Type::Unknown | Type::Never => {
                 self.substitutions.insert(ty_var_key, ty.clone());
             }
 
@@ -241,6 +273,59 @@ impl Substitution {
                     });
                 };
                 self.substitutions.insert(ty_var_key, ty.clone());
+            }
+
+            Type::Callable(FnPtrType {
+                params_types: callable_params_types,
+                return_type: callable_return_type,
+            }) => {
+                let (Type::FnPtr(FnPtrType {
+                    params_types,
+                    return_type,
+                })
+                | Type::Lambda(LambdaType {
+                    params_types,
+                    return_type,
+                })
+                | Type::Callable(FnPtrType {
+                    params_types,
+                    return_type,
+                })) = &*ty.borrow()
+                else {
+                    return Err(TypeUnificationErr::CannotUnify {
+                        t1: self.all_ty_vars[ty_var_key].clone(),
+                        t2: ty.clone(),
+                    });
+                };
+
+                let mut r_params = Ok(());
+
+                for (param_ty, callable_param_ty) in params_types.iter().zip(&callable_params_types)
+                {
+                    let rr = self.unify(param_ty, &callable_param_ty);
+                    if rr.is_err() {
+                        r_params = rr;
+                    }
+                }
+
+                let r = self.unify(return_type, &callable_return_type);
+
+                let ty = match &*ty.borrow() {
+                    Type::FnPtr(_) => Ty::fn_ptr(callable_params_types, callable_return_type),
+                    Type::Lambda(_) => Ty::lambda(callable_params_types, callable_return_type),
+                    Type::Callable(_) => Ty::callable(callable_params_types, callable_return_type),
+                    _ => unreachable!(),
+                };
+
+                self.substitutions.insert(ty_var_key, ty);
+
+                return if r.is_err() {
+                    r
+                } else if r_params.is_err() {
+                    r_params
+                } else {
+                    Ok(())
+                };
             }
 
             _ => unreachable!(),
