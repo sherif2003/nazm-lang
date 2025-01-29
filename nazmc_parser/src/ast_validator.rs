@@ -1281,24 +1281,12 @@ impl<'a> ASTValidator<'a> {
 
                 self.new_expr(span, nazmc_ast::ExprKind::Return(expr))
             }
-            AtomicExpr::Break(break_expr) => {
-                let expr = break_expr.expr.map(|e| self.lower_expr(e));
-
-                let span = if let Some(e) = expr.as_ref() {
-                    break_expr
-                        .break_keyword
-                        .span
-                        .merged_with(&self.get_expr_span(*e))
-                } else {
-                    break_expr.break_keyword.span
-                };
-
-                self.new_expr(span, nazmc_ast::ExprKind::Break(expr))
+            AtomicExpr::Break(break_keyword) => {
+                self.new_expr(break_keyword.span, nazmc_ast::ExprKind::Break)
             }
-            AtomicExpr::Continue(continue_expr) => self.new_expr(
-                continue_expr.continue_keyword.span,
-                nazmc_ast::ExprKind::Continue,
-            ),
+            AtomicExpr::Continue(continue_keyword) => {
+                self.new_expr(continue_keyword.span, nazmc_ast::ExprKind::Continue)
+            }
             AtomicExpr::On(on) => self.new_expr(on.span, nazmc_ast::ExprKind::On),
         }
     }

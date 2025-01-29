@@ -216,6 +216,16 @@ pub enum BindingKind {
     Tuple(ThinVec<BindingKind>, Span),
 }
 
+impl BindingKind {
+    pub fn get_span(&self) -> Span {
+        match self {
+            BindingKind::Id(astid) => astid.span,
+            BindingKind::MutId { id, mut_span } => id.span,
+            BindingKind::Tuple(_, span) => *span,
+        }
+    }
+}
+
 pub fn expand_names_binding<'b>(kind: &'b BindingKind, bound_names: &mut Vec<&'b ASTId>) {
     match kind {
         BindingKind::Id(id) => {
@@ -369,7 +379,7 @@ pub enum ExprKind {
     UnaryOp(Box<UnaryOpExpr>),
     BinaryOp(Box<BinaryOpExpr>),
     Return(Option<ExprKey>),
-    Break(Option<ExprKey>),
+    Break,
     Continue,
     On,
 }

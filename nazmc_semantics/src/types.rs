@@ -1,4 +1,4 @@
-use typed_ast::{FieldsStruct, TupleStruct, TupleType, Ty, Type};
+use typed_ast::{FieldsStruct, TupleStruct, Ty, Type};
 
 use crate::*;
 

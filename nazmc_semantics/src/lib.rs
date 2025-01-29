@@ -101,9 +101,10 @@ impl<'a> SemanticsAnalyzer<'a> {
         println!("Len: {}", self.typed_ast.exprs.values().len());
         for (key, ty) in &self.typed_ast.exprs {
             println!(
-                "Key: {:?}, Ty: {}",
+                "{:?}, Ty: {}, Kind: {:?}",
+                *key,
+                self.fmt_ty(&ty),
                 self.ast.exprs[*key].kind,
-                self.fmt_ty(&ty)
             )
         }
 
@@ -143,12 +144,15 @@ impl<'a> SemanticsAnalyzer<'a> {
                             if let Some(type_expr_key) = self.ast.lets[*let_stm_key].binding.typ {
                                 self.analyze_type_expr(type_expr_key).0
                             } else {
-                                self.s.new_unknown_ty_var()
+                                self.s.new_unknown_ty_var(
+                                    self.current_file_key,
+                                    self.ast.lets[*let_stm_key].binding.kind.get_span(),
+                                )
                             };
 
                         println!("Let type: {:#?}", let_stm_type.inner());
 
-                        let expr_span = self.ast.exprs[expr_key].span;
+                        let expr_span = self.get_expr_span(expr_key);
 
                         println!("Expr type: {:#?}", expr_ty.inner());
 
@@ -163,7 +167,10 @@ impl<'a> SemanticsAnalyzer<'a> {
 
                         let_stm_type
                     } else {
-                        self.s.new_unknown_ty_var()
+                        self.s.new_unknown_ty_var(
+                            self.current_file_key,
+                            self.ast.lets[*let_stm_key].binding.kind.get_span(),
+                        )
                     };
 
                     println!("Let inferred type: {:#?}", let_stm_type.inner());
@@ -235,7 +242,9 @@ impl<'a> SemanticsAnalyzer<'a> {
                     }
                 } else {
                     let found_ty = self.destructed_tuple_to_ty_with_unknown(let_stm_key, &kinds);
-                    // self.unify(ty, &found_ty, span);
+                    if let Err(err) = self.s.unify(ty, &found_ty) {
+                        self.add_type_mismatch_err(&ty, &found_ty, span);
+                    }
                 }
             }
         }
@@ -249,7 +258,9 @@ impl<'a> SemanticsAnalyzer<'a> {
         let mut tuple_types = ThinVec::with_capacity(kinds.len());
         for i in 0..kinds.len() {
             let kind = &kinds[i];
-            let ty = self.s.new_unknown_ty_var();
+            let ty = self
+                .s
+                .new_unknown_ty_var(self.current_file_key, kind.get_span());
             self.set_bindnig_ty(let_stm_key, kind.clone(), &ty);
             tuple_types.push(ty);
         }

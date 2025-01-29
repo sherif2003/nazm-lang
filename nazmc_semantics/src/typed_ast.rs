@@ -57,7 +57,6 @@ pub enum Type {
     UnspecifiedUnsignedInt,
     UnspecifiedSignedInt,
     UnspecifiedFloat,
-    Callable(FnPtrType),
     TypeVar(TypeVarKey),
     Slice(Ty),
     Ptr(Ty),
@@ -177,14 +176,6 @@ impl Ty {
         Self::new(Type::UnspecifiedFloat)
     }
 
-    /// Create a `Callable` type.
-    pub fn callable(params: impl IntoIterator<Item = Ty>, return_type: Ty) -> Self {
-        Self::new(Type::Callable(FnPtrType {
-            params_types: params.into_iter().collect(),
-            return_type,
-        }))
-    }
-
     /// Create a new `TypeVar` type with the given key.
     pub fn type_var(ty_var_key: TypeVarKey) -> Self {
         Self::new(Type::TypeVar(ty_var_key))
@@ -195,32 +186,32 @@ impl Ty {
         Self::new(Type::Concrete(concrete_type))
     }
 
-    /// Create a `ConcreteType::Slice` type.
+    /// Create a `Slice` type.
     pub fn slice(inner: Ty) -> Self {
         Self::new(Type::Slice(inner))
     }
 
-    /// Create a `ConcreteType::Ptr` type.
+    /// Create a `Ptr` type.
     pub fn ptr(inner: Ty) -> Self {
         Self::new(Type::Ptr(inner))
     }
 
-    /// Create a `ConcreteType::Ref` type.
+    /// Create a `Ref` type.
     pub fn reference(inner: Ty) -> Self {
         Self::new(Type::Ref(inner))
     }
 
-    /// Create a `ConcreteType::PtrMut` type.
+    /// Create a `PtrMut` type.
     pub fn ptr_mut(inner: Ty) -> Self {
         Self::new(Type::PtrMut(inner))
     }
 
-    /// Create a `ConcreteType::RefMut` type.
+    /// Create a `RefMut` type.
     pub fn ref_mut(inner: Ty) -> Self {
         Self::new(Type::RefMut(inner))
     }
 
-    /// Create a `ConcreteType::Array` type.
+    /// Create a `Array` type.
     pub fn array(underlying: Ty, size: u32) -> Self {
         Self::new(Type::Array(ArrayType {
             underlying_typ: underlying,
@@ -228,14 +219,14 @@ impl Ty {
         }))
     }
 
-    /// Create a `ConcreteType::Tuple` type.
+    /// Create a `Tuple` type.
     pub fn tuple(types: impl IntoIterator<Item = Ty>) -> Self {
         Self::new(Type::Tuple(TupleType {
             types: types.into_iter().collect(),
         }))
     }
 
-    /// Create a `ConcreteType::Lambda` type.
+    /// Create a `Lambda` type.
     pub fn lambda(params: impl IntoIterator<Item = Ty>, return_type: Ty) -> Self {
         Self::new(Type::Lambda(LambdaType {
             params_types: params.into_iter().collect(),
@@ -243,7 +234,7 @@ impl Ty {
         }))
     }
 
-    /// Create a `ConcreteType::FnPtr` type.
+    /// Create a `FnPtr` type.
     pub fn fn_ptr(params: impl IntoIterator<Item = Ty>, return_type: Ty) -> Self {
         Self::new(Type::FnPtr(FnPtrType {
             params_types: params.into_iter().collect(),

@@ -607,10 +607,12 @@ impl NazmcParse for ParseResult<TupleIdx> {
                 .chars()
                 .all(|c| c.is_ascii_digit()) =>
             {
-                Ok(Terminal {
+                let ok = Ok(Terminal {
                     span: *span,
                     data: *int as usize,
-                })
+                });
+                iter.next_non_space_or_comment();
+                ok
             }
             Some(_) => Err(ParseErr {
                 found_token_index: iter.peek_idx - 1,

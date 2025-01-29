@@ -30,7 +30,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let new_ty = &self.s.apply(ty);
                 if new_ty == ty {
                     // format!("_{}", usize::from(ty_var_key))
-                    self.fmt_ty(&self.s.all_ty_vars[ty_var_key])
+                    self.fmt_ty(&self.s.all_ty_vars[ty_var_key].0)
                 } else {
                     self.fmt_ty(new_ty)
                 }
@@ -66,7 +66,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .join("، "),
                 self.fmt_ty(&lambda_type.return_type)
             ),
-            Type::FnPtr(fn_ptr_type) | Type::Callable(fn_ptr_type) => format!(
+            Type::FnPtr(fn_ptr_type) => format!(
                 "دالة({}) -> {}",
                 fn_ptr_type
                     .params_types
@@ -142,6 +142,11 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
+    #[inline]
+    pub(crate) fn get_expr_span(&self, expr_key: ExprKey) -> Span {
+        self.ast.exprs[expr_key].span
+    }
+
     pub(crate) fn add_type_mismatch_err(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
         let mut code_window = CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
         code_window.mark_error(
@@ -166,7 +171,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         // Is fn or lambda
         is_fn: bool,
     ) {
-        let call_on_span = self.ast.exprs[call_on_expr_key].span;
+        let call_on_span = self.get_expr_span(call_on_expr_key);
 
         let mut code_window =
             CodeWindow::new(&self.files_infos[self.current_file_key], arg_span.start);
@@ -218,7 +223,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         // Is fn or lambda
         is_fn: bool,
     ) {
-        let call_on_span = self.ast.exprs[call_on_expr_key].span;
+        let call_on_span = self.get_expr_span(call_on_expr_key);
 
         let mut code_window =
             CodeWindow::new(&self.files_infos[self.current_file_key], parens_span.start);
@@ -268,7 +273,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         non_callable_span: Span,
         parens_span: Span,
     ) {
-        let msg = format!("");
+        let msg = format!("لا يمكن تنفيذ عملية الاستدعاء");
         let label1 = format!("يجب أن يكون دالة أو تعبير لامدا");
         let label2 = format!("ولكنه من النوع `{}`", self.fmt_ty(non_callable_ty));
         let mut code_window = CodeWindow::new(
@@ -277,6 +282,50 @@ impl<'a> SemanticsAnalyzer<'a> {
         );
         code_window.mark_secondary(non_callable_span, vec![label1, label2]);
         code_window.mark_error(parens_span, vec![]);
+        let diagnostic = Diagnostic::error(msg, vec![code_window]);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_indexing_non_indexable_err(
+        &mut self,
+        non_indexable_ty: &Ty,
+        brackets_span: Span,
+    ) {
+        let msg = format!(
+            "لا يمكن فهرسة قيمة من النوع `{}`",
+            self.fmt_ty(non_indexable_ty)
+        );
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            brackets_span.start,
+        );
+        code_window.mark_error(brackets_span, vec![]);
+        let diagnostic = Diagnostic::error(msg, vec![code_window]);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_out_of_bounds_tuple_idx_err(
+        &mut self,
+        idx: usize,
+        tuple_len: usize,
+        idx_span: Span,
+    ) {
+        let msg = format!(
+            "الرقم المرجعي {} خارج حدود الترتيب الذي يحتوي على {} عنصرًا",
+            idx, tuple_len
+        );
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], idx_span.start);
+        code_window.mark_error(idx_span, vec![msg]);
+        let diagnostic = Diagnostic::error("خطأ في فهرسة الترتيب".into(), vec![code_window]);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_indexing_non_tuple_err(&mut self, found_ty: &Ty, idx_span: Span) {
+        let msg = format!("لا يمكن فهرسة النوع `{}` كترتيب", self.fmt_ty(found_ty));
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], idx_span.start);
+        code_window.mark_error(idx_span, vec![]);
         let diagnostic = Diagnostic::error(msg, vec![code_window]);
         self.diagnostics.push(diagnostic);
     }
