@@ -4,6 +4,14 @@ use crate::{
 };
 
 impl<'a> SemanticsAnalyzer<'a> {
+    pub(crate) fn infer_scope(&mut self, scope_key: ScopeKey) -> Ty {
+        self.analyze_scope(scope_key);
+        let return_ty = self.ast.scopes[scope_key]
+            .return_expr
+            .map_or_else(|| Ty::unit(), |expr_key| self.infer(expr_key));
+        return_ty
+    }
+
     pub(crate) fn infer(&mut self, expr_key: ExprKey) -> Ty {
         let ty = match &self.ast.exprs[expr_key].kind {
             ExprKind::Unit => Ty::unit(),
@@ -35,10 +43,10 @@ impl<'a> SemanticsAnalyzer<'a> {
                 // TODO: Remove the clone
                 self.infer_fields_struct_expr(&fields_struct_expr.clone(), expr_key)
             }
+            ExprKind::If(if_expr) => self.infer_if_expr(&if_expr.clone(), expr_key), // TODO: Remove the clone
             ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
             ExprKind::Field(field_expr) => todo!(),
             ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
-            ExprKind::If(if_expr) => todo!(),
             ExprKind::Lambda(lambda_expr) => todo!(),
             ExprKind::UnaryOp(unary_op_expr) => todo!(),
             ExprKind::BinaryOp(binary_op_expr) => todo!(),
@@ -274,7 +282,12 @@ impl<'a> SemanticsAnalyzer<'a> {
         for &elem in &elements[1..] {
             let elem_ty = self.infer(elem);
             if let Err(_) = self.s.unify(&first_ty, &elem_ty) {
-                self.add_type_mismatch_err(&first_ty, &elem_ty, self.get_expr_span(elem));
+                self.add_array_element_type_mismatch_err(
+                    &first_ty,
+                    &elem_ty,
+                    self.get_expr_span(elements[0]),
+                    self.get_expr_span(elem),
+                );
             }
         }
 
@@ -411,5 +424,71 @@ impl<'a> SemanticsAnalyzer<'a> {
         {
             self.add_filed_is_inaccessable_err(struct_key, field_idx, field_id_expr_span);
         }
+    }
+
+    fn infer_if_expr(
+        &mut self,
+        IfExpr {
+            if_: (if_keyword_span, if_cond_expr_key, if_scope_key),
+            else_ifs,
+            else_,
+        }: &IfExpr,
+        expr_key: ExprKey,
+    ) -> Ty {
+        let if_cond_ty = self.infer(*if_cond_expr_key);
+
+        if let Err(err) = self.s.unify(&Ty::boolean(), &if_cond_ty) {
+            self.add_type_mismatch_err(
+                &Ty::boolean(),
+                &if_cond_ty,
+                self.get_expr_span(*if_cond_expr_key),
+            );
+        }
+
+        let if_ty = self.infer_scope(*if_scope_key);
+
+        for (else_if_keyword_span, else_if_cond_expr_key, else_if_scope_key) in else_ifs {
+            let else_if_cond_ty = self.infer(*if_cond_expr_key);
+
+            if let Err(err) = self.s.unify(&Ty::boolean(), &else_if_cond_ty) {
+                self.add_type_mismatch_err(
+                    &Ty::boolean(),
+                    &else_if_cond_ty,
+                    self.get_expr_span(*else_if_cond_expr_key),
+                );
+            }
+
+            let else_if_ty = self.infer_scope(*else_if_scope_key);
+
+            if let Err(err) = self.s.unify(&if_ty, &else_if_ty) {
+                self.add_type_mismatch_in_if_branches_err(
+                    &if_ty,
+                    &else_if_ty,
+                    *if_scope_key,
+                    *else_if_scope_key,
+                    *if_keyword_span,
+                    *else_if_keyword_span,
+                );
+            }
+        }
+
+        if let Some((else_keyword_span, else_scope_key)) = else_ {
+            let else_ty = self.infer_scope(*else_scope_key);
+
+            if let Err(err) = self.s.unify(&if_ty, &else_ty) {
+                self.add_type_mismatch_in_if_branches_err(
+                    &if_ty,
+                    &else_ty,
+                    *if_scope_key,
+                    *else_scope_key,
+                    *if_keyword_span,
+                    *else_keyword_span,
+                );
+            }
+        } else if let Err(err) = self.s.unify(&Ty::unit(), &if_ty) {
+            self.add_missing_else_branch_err(&if_ty, *if_keyword_span, *if_scope_key);
+        }
+
+        if_ty
     }
 }

@@ -1,3 +1,5 @@
+use std::fmt::format;
+
 use crate::*;
 
 impl<'a> SemanticsAnalyzer<'a> {
@@ -304,6 +306,37 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.diagnostics.push(diagnostic);
     }
 
+    pub(crate) fn add_array_element_type_mismatch_err(
+        &mut self,
+        expected_ty: &Ty,
+        found_ty: &Ty,
+        first_element_span: Span,
+        element_span: Span,
+    ) {
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], element_span.start);
+        let expected_ty = self.fmt_ty(expected_ty);
+
+        code_window.mark_error(
+            element_span,
+            vec![format!(
+                "يُتوقّع النوع `{}` ولكن تم العثور على النوع `{}`",
+                expected_ty,
+                self.fmt_ty(found_ty)
+            )],
+        );
+        code_window.mark_secondary(
+            first_element_span,
+            vec![format!(
+                "أول عنصر في المصفوفة هو من النوع `{}`",
+                expected_ty
+            )],
+        );
+
+        let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![code_window]);
+        self.diagnostics.push(diagnostic);
+    }
+
     pub(crate) fn add_out_of_bounds_tuple_idx_err(
         &mut self,
         idx: usize,
@@ -520,6 +553,98 @@ impl<'a> SemanticsAnalyzer<'a> {
         note_code_window.mark_secondary(struct_info.id_span, vec![]);
         note_code_window.mark_note(field_ast_id.span, vec![]);
         let note = Diagnostic::note(note_msg, vec![note_code_window]);
+
+        diagnostic.chain(note);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_type_mismatch_in_if_branches_err(
+        &mut self,
+        if_ty: &Ty,
+        second_branch_ty: &Ty,
+        if_scope_key: ScopeKey,
+        second_branch_scope_key: ScopeKey,
+        if_keyword_span: Span,
+        branch_keyword_span: Span,
+    ) {
+        let if_ty_name = self.fmt_ty(&if_ty);
+        let branch_ty_name = self.fmt_ty(&second_branch_ty);
+
+        let if_return_expr_key = self.ast.scopes[if_scope_key].return_expr;
+        let branch_return_expr_key = self.ast.scopes[second_branch_scope_key].return_expr;
+        let branch_span = branch_return_expr_key.map_or_else(
+            || branch_keyword_span,
+            |expr_key| self.get_expr_span(expr_key),
+        );
+
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], branch_span.start);
+
+        if let Some(expr_key) = if_return_expr_key {
+            code_window.mark_secondary(if_keyword_span, vec![]);
+            code_window.mark_secondary(
+                self.get_expr_span(expr_key),
+                vec![format!("التفرع ينتهي بقيمة من النوع `{}`", if_ty_name)],
+            );
+        } else {
+            code_window.mark_secondary(
+                if_keyword_span,
+                vec![format!("التفرع ينتهي بقيمة من النوع `{}`", if_ty_name)],
+            );
+        }
+
+        if branch_return_expr_key.is_some() {
+            code_window.mark_secondary(branch_keyword_span, vec![]);
+        }
+
+        code_window.mark_error(
+            branch_span,
+            vec![
+                format!("التفرع ينتهي بقيمة من النوع `{}`", branch_ty_name),
+                format!(
+                    "التفرع يجب أن ينتهي بقيمة من النوع `{}` مثل التفرع الأول",
+                    if_ty_name
+                ),
+            ],
+        );
+
+        let diagnostic = Diagnostic::error(
+            format!("تعبيرات `لو` يجب أن تنتهي بقيم من نفس النوع"),
+            vec![code_window],
+        );
+
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_missing_else_branch_err(
+        &mut self,
+        if_ty: &Ty,
+        if_keyword_span: Span,
+        if_scope_key: ScopeKey,
+    ) {
+        let if_full_span = if_keyword_span.merged_with(&self.ast.scopes[if_scope_key].span);
+
+        let if_return_expr_span =
+            self.get_expr_span(self.ast.scopes[if_scope_key].return_expr.unwrap());
+
+        let if_ty_name = self.fmt_ty(&if_ty);
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], if_full_span.start);
+
+        code_window.mark_error(if_full_span, vec![]);
+        code_window.mark_secondary(
+            if_return_expr_span,
+            vec![format!("التفرع ينتهي بقيمة من النوع `{}`", if_ty_name)],
+        );
+
+        let mut diagnostic = Diagnostic::error(
+            "يجب أن يكون هناك تفرع `وإلا` لتعبير `لو`".into(),
+            vec![code_window],
+        );
+        let note = Diagnostic::note(
+            "تعبير `وإلا` يمكن إهماله إذا كانت `لو` تنتهي بقيمة من النوع `()`".into(),
+            vec![],
+        );
 
         diagnostic.chain(note);
         self.diagnostics.push(diagnostic);

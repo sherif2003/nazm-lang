@@ -328,6 +328,7 @@ pub struct Scope {
     pub extra_params: Vec<IdKey>,
     pub stms: ThinVec<Stm>,
     pub return_expr: Option<ExprKey>,
+    pub span: Span,
 }
 
 #[derive(Clone)]
@@ -457,9 +458,9 @@ pub struct ArrayElementsSizedExpr {
 
 #[derive(Clone, Debug)]
 pub struct IfExpr {
-    pub if_: (ExprKey, ScopeKey),
-    pub else_ifs: ThinVec<(ExprKey, ScopeKey)>,
-    pub else_: Option<ScopeKey>,
+    pub if_: (Span, ExprKey, ScopeKey),
+    pub else_ifs: ThinVec<(Span, ExprKey, ScopeKey)>,
+    pub else_: Option<(Span, ScopeKey)>,
 }
 
 #[derive(Clone, Debug)]

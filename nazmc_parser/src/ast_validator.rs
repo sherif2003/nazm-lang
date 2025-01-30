@@ -782,7 +782,10 @@ impl<'a> ASTValidator<'a> {
         self.current_scope_key = self.ast.scopes.push_and_get_key(scope);
         self.ast.state.scope_events.push(ThinVec::new());
 
-        self.ast.scopes[self.current_scope_key].return_expr = Some(self.lower_expr(expr));
+        let expr_key = self.lower_expr(expr);
+        let expr_span = self.ast.exprs[expr_key].span;
+        self.ast.scopes[self.current_scope_key].return_expr = Some(expr_key);
+        self.ast.scopes[self.current_scope_key].span = expr_span;
 
         let scope_key = self.current_scope_key;
         self.current_scope_key = last_scope_key;
@@ -791,15 +794,26 @@ impl<'a> ASTValidator<'a> {
 
     #[inline]
     fn lower_lambda_as_body(&mut self, lambda: LambdaExpr) -> nazmc_ast::ScopeKey {
-        self.lower_lambda_stms_and_return_expr(lambda.stms, lambda.last_expr)
+        self.lower_lambda_stms_and_return_expr(
+            lambda.stms,
+            lambda.last_expr,
+            lambda
+                .open_curly
+                .span
+                .merged_with(&lambda.close_curly.unwrap().span),
+        )
     }
 
     fn lower_lambda_stms_and_return_expr(
         &mut self,
         stms: Vec<ParseResult<Stm>>,
         return_expr: Option<Expr>,
+        span: Span,
     ) -> nazmc_ast::ScopeKey {
-        let scope = nazmc_ast::Scope::default();
+        let scope = nazmc_ast::Scope {
+            span,
+            ..Default::default()
+        };
         let last_scope_key = self.current_scope_key;
         self.current_scope_key = self.ast.scopes.push_and_get_key(scope);
         self.ast.state.scope_events.push(ThinVec::new());
@@ -1492,7 +1506,8 @@ impl<'a> ASTValidator<'a> {
             .span
             .merged_with(&lambda_expr.close_curly.unwrap().span);
 
-        let body = self.lower_lambda_stms_and_return_expr(lambda_expr.stms, lambda_expr.last_expr);
+        let body =
+            self.lower_lambda_stms_and_return_expr(lambda_expr.stms, lambda_expr.last_expr, span);
 
         let lambda = if let Some(arrow) = lambda_expr.lambda_arrow {
             let mut params = ThinVec::new();
@@ -1546,7 +1561,7 @@ impl<'a> ASTValidator<'a> {
         self.ast.state.scope_events[self.current_scope_key]
             .push(nazmc_ast::ScopeEvent::Scope(if_body));
 
-        let if_ = (if_condition, if_body);
+        let if_ = (if_expr.if_keyword.span, if_condition, if_body);
 
         let mut else_ifs = ThinVec::new();
 
@@ -1557,14 +1572,21 @@ impl<'a> ASTValidator<'a> {
             self.ast.state.scope_events[self.current_scope_key]
                 .push(nazmc_ast::ScopeEvent::Scope(body));
 
-            else_ifs.push((condition, body));
+            else_ifs.push((
+                else_if
+                    .else_keyword
+                    .span
+                    .merged_with(&else_if.if_keyword.span),
+                condition,
+                body,
+            ));
         }
 
         let else_ = if_expr.else_cluase.map(|e| {
             let body = self.lower_lambda_as_body(e.block.unwrap());
             self.ast.state.scope_events[self.current_scope_key]
                 .push(nazmc_ast::ScopeEvent::Scope(body));
-            body
+            (e.else_keyword.span, body)
         });
 
         nazmc_ast::IfExpr {
