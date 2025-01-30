@@ -45,7 +45,9 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
             ExprKind::If(if_expr) => self.infer_if_expr(&if_expr.clone(), expr_key), // TODO: Remove the clone
             ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
-            ExprKind::Field(field_expr) => todo!(),
+            ExprKind::Field(field_expr) => {
+                self.infer_field_expr(&field_expr.clone(), expr_key) // TODO: Remove the clone
+            }
             ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
             ExprKind::Lambda(lambda_expr) => todo!(),
             ExprKind::UnaryOp(unary_op_expr) => todo!(),
@@ -314,7 +316,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 }
             }
             Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
-                self.add_indexing_non_tuple_err(&on_expr_ty, *idx_span);
+                self.add_indexing_non_tuple_err(&on_expr_ty, on, *idx_span);
                 self.s
                     .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
             }
@@ -325,7 +327,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 unknown_ty
             }
             _ => {
-                self.add_indexing_non_tuple_err(&on_expr_ty, *idx_span);
+                self.add_indexing_non_tuple_err(&on_expr_ty, on, *idx_span);
                 self.s
                     .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
             }
@@ -490,5 +492,46 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
 
         if_ty
+    }
+
+    fn infer_field_expr(&mut self, FieldExpr { on, name }: &FieldExpr, expr_key: ExprKey) -> Ty {
+        let on = *on;
+        let on_expr_ty = self.infer(on);
+
+        match on_expr_ty.inner() {
+            Type::Concrete(ConcreteType::FieldsStruct(struct_key)) => {
+                let struct_fields = &self.typed_ast.fields_structs[&struct_key].fields;
+                if let Some(FieldInfo {
+                    offset: _,
+                    typ,
+                    idx,
+                }) = struct_fields.get(&name.id)
+                {
+                    let ty = typ.clone();
+                    self.check_field_is_accessible_in_current_file(struct_key, *idx, name.span);
+                    ty
+                } else {
+                    self.add_unknown_field_in_struct_expr_err(struct_key, name.id, name.span);
+                    self.s
+                        .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                }
+            }
+            Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
+                self.add_type_doesnt_have_fields_err(&on_expr_ty, on, *name);
+                self.s
+                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+            }
+            Type::TypeVar(_) => {
+                let unknown_ty = self
+                    .s
+                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                unknown_ty
+            }
+            _ => {
+                self.add_type_doesnt_have_fields_err(&on_expr_ty, on, *name);
+                self.s
+                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+            }
+        }
     }
 }

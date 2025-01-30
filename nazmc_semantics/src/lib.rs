@@ -166,6 +166,8 @@ impl<'a> SemanticsAnalyzer<'a> {
                         println!("Expr inferred type: {:#?}", expr_ty.inner());
 
                         let_stm_type
+                    } else if let Some(type_expr_key) = self.ast.lets[*let_stm_key].binding.typ {
+                        self.analyze_type_expr(type_expr_key).0
                     } else {
                         self.s.new_unknown_ty_var(
                             self.current_file_key,

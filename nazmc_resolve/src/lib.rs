@@ -817,10 +817,13 @@ impl<'a> NameResolver<'a> {
         let mut code_window = CodeWindow::new(file_info, at_span.start);
         code_window.mark_error(at_span, vec![]);
 
-        let help = self.help_diagnostic_to_find_item(item);
-
         let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
-        diagnostic.chain(help);
+
+        if !matches!(item, Item::Pkg | Item::LocalVar { .. }) {
+            let help = self.help_diagnostic_to_find_item(item);
+            diagnostic.chain(help);
+        }
+
         self.diagnostics.push(diagnostic);
     }
 

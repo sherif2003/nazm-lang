@@ -1,4 +1,4 @@
-use std::fmt::format;
+use std::{fmt::format, vec};
 
 use crate::*;
 
@@ -354,10 +354,20 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.diagnostics.push(diagnostic);
     }
 
-    pub(crate) fn add_indexing_non_tuple_err(&mut self, found_ty: &Ty, idx_span: Span) {
-        let msg = format!("لا يمكن فهرسة النوع `{}` كترتيب", self.fmt_ty(found_ty));
+    pub(crate) fn add_indexing_non_tuple_err(
+        &mut self,
+        found_ty: &Ty,
+        on_expr_key: ExprKey,
+        idx_span: Span,
+    ) {
+        let found_ty = self.fmt_ty(found_ty);
+        let msg = format!("لا يمكن فهرسة النوع `{}` كترتيب", found_ty);
         let mut code_window =
             CodeWindow::new(&self.files_infos[self.current_file_key], idx_span.start);
+        code_window.mark_secondary(
+            self.get_expr_span(on_expr_key),
+            vec![format!("التعبير من النوع `{}`", found_ty)],
+        );
         code_window.mark_error(idx_span, vec![]);
         let diagnostic = Diagnostic::error(msg, vec![code_window]);
         self.diagnostics.push(diagnostic);
@@ -647,6 +657,27 @@ impl<'a> SemanticsAnalyzer<'a> {
         );
 
         diagnostic.chain(note);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_type_doesnt_have_fields_err(
+        &mut self,
+        found_ty: &Ty,
+        on_expr_key: ExprKey,
+        field_name_expr: ASTId,
+    ) {
+        let found_ty = self.fmt_ty(found_ty);
+        let msg = format!("النوع `{}` لا يحتوي على حقول", found_ty);
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            field_name_expr.span.start,
+        );
+        code_window.mark_secondary(
+            self.get_expr_span(on_expr_key),
+            vec![format!("التعبير من النوع `{}`", found_ty)],
+        );
+        code_window.mark_error(field_name_expr.span, vec![]);
+        let diagnostic = Diagnostic::error(msg, vec![code_window]);
         self.diagnostics.push(diagnostic);
     }
 }
