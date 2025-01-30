@@ -82,9 +82,9 @@ impl<'a> SemanticsAnalyzer<'a> {
         //     self.analyze_type_expr(type_expr_key);
         // }
 
-        // for expr_key in self.ast.exprs.keys() {
-        //     self.analyze_expr(expr_key);
-        // }
+        for struct_key in self.ast.fields_structs.keys() {
+            self.analyze_fields_struct(struct_key);
+        }
 
         for fn_key in self.ast.fns.keys() {
             self.analyze_fn_signature(fn_key);

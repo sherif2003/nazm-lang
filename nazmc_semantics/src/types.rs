@@ -296,7 +296,11 @@ impl<'a> SemanticsAnalyzer<'a> {
                 offset = aligned_offset;
             }
 
-            types.push(typed_ast::FieldInfo { offset, typ });
+            types.push(typed_ast::FieldInfo {
+                offset,
+                typ,
+                idx: i as u32,
+            });
             offset += size as u32;
         }
 
@@ -315,7 +319,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     #[inline]
-    fn analyze_fields_struct(&mut self, key: FieldsStructKey) {
+    pub(crate) fn analyze_fields_struct(&mut self, key: FieldsStructKey) {
         if self.typed_ast.fields_structs.contains_key(&key) {
             // It is already computed
             return;
@@ -363,7 +367,14 @@ impl<'a> SemanticsAnalyzer<'a> {
                 offset = aligned_offset;
             }
 
-            fields.insert(id, typed_ast::FieldInfo { offset, typ });
+            fields.insert(
+                id,
+                typed_ast::FieldInfo {
+                    offset,
+                    typ,
+                    idx: i as u32,
+                },
+            );
             offset += size as u32;
         }
 

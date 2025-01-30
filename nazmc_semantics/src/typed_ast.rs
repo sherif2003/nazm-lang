@@ -143,6 +143,7 @@ pub struct FieldsStruct {
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct FieldInfo {
     pub offset: u32,
+    pub idx: u32,
     pub typ: Ty,
 }
 

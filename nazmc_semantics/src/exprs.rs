@@ -1,4 +1,7 @@
-use crate::{typed_ast::ArrayType, *};
+use crate::{
+    typed_ast::{ArrayType, FieldInfo},
+    *,
+};
 
 impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn infer(&mut self, expr_key: ExprKey) -> Ty {
@@ -28,8 +31,11 @@ impl<'a> SemanticsAnalyzer<'a> {
             ExprKind::TupleIdx(tuple_idx_expr) => {
                 self.infer_tuple_idx_expr(&tuple_idx_expr.clone(), expr_key) // TODO: Remove the clone
             }
+            ExprKind::FieldsStruct(fields_struct_expr) => {
+                // TODO: Remove the clone
+                self.infer_fields_struct_expr(&fields_struct_expr.clone(), expr_key)
+            }
             ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
-            ExprKind::FieldsStruct(fields_struct_expr) => todo!(),
             ExprKind::Field(field_expr) => todo!(),
             ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
             ExprKind::If(if_expr) => todo!(),
@@ -310,6 +316,100 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.s
                     .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
             }
+        }
+    }
+
+    fn infer_fields_struct_expr(
+        &mut self,
+        FieldsStructExpr {
+            path_key,
+            fields: fields_exprs,
+        }: &FieldsStructExpr,
+        expr_key: ExprKey,
+    ) -> Ty {
+        let struct_key = self.ast.state.field_structs_paths_exprs[*path_key];
+
+        let mut struct_fields = self.typed_ast.fields_structs[&struct_key].fields.clone();
+
+        let mut used_fields = HashMap::with_capacity(struct_fields.len());
+
+        for (field_id_expr, field_expr_key) in fields_exprs {
+            let field_expr_ty = self.infer(*field_expr_key);
+
+            if let Some(used_span) = used_fields.get(&field_id_expr.id) {
+                self.add_field_is_used_more_than_once_err(
+                    struct_key,
+                    field_id_expr.id,
+                    *used_span,
+                    field_id_expr.span,
+                );
+            } else if let Some(FieldInfo {
+                offset: _,
+                typ: field_ty,
+                idx,
+            }) = struct_fields.get(&field_id_expr.id)
+            {
+                if let Err(err) = self.s.unify(&field_ty, &field_expr_ty) {
+                    self.add_field_type_mismatch_err(
+                        &field_ty,
+                        &field_expr_ty,
+                        struct_key,
+                        *idx,
+                        field_id_expr.span,
+                        self.get_expr_span(*field_expr_key),
+                    );
+                }
+
+                self.check_field_is_accessible_in_current_file(
+                    struct_key,
+                    *idx,
+                    field_id_expr.span,
+                );
+
+                used_fields.insert(
+                    field_id_expr.id,
+                    field_id_expr
+                        .span
+                        .merged_with(&self.get_expr_span(*field_expr_key)),
+                );
+
+                struct_fields.remove(&field_id_expr.id);
+            } else {
+                self.add_unknown_field_in_struct_expr_err(
+                    struct_key,
+                    field_id_expr.id,
+                    field_id_expr.span,
+                );
+            }
+        }
+
+        if !struct_fields.is_empty() {
+            self.add_missing_fields_in_struct_expr_err(
+                struct_key,
+                struct_fields.iter().map(|(id, _)| *id).collect(),
+                self.get_expr_span(expr_key),
+            );
+        }
+
+        Ty::fields_struct(struct_key)
+    }
+
+    fn check_field_is_accessible_in_current_file(
+        &mut self,
+        struct_key: FieldsStructKey,
+        field_idx: u32,
+        field_id_expr_span: Span,
+    ) {
+        let struct_file_key = self.ast.fields_structs[struct_key].info.file_key;
+        let struct_pkg_key = self.files_to_pkgs[struct_file_key];
+        let current_file_pkg_key = self.files_to_pkgs[self.current_file_key];
+
+        let vis = self.ast.fields_structs[struct_key].fields[field_idx as usize].vis;
+
+        if matches!(vis, VisModifier::Private) && struct_file_key != self.current_file_key
+            || matches!(vis, VisModifier::Default) && struct_pkg_key != current_file_pkg_key
+        {
+            self.add_filed_is_inaccessable_err(struct_key, field_idx, field_id_expr_span);
         }
     }
 }

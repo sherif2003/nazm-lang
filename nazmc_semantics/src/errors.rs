@@ -329,4 +329,199 @@ impl<'a> SemanticsAnalyzer<'a> {
         let diagnostic = Diagnostic::error(msg, vec![code_window]);
         self.diagnostics.push(diagnostic);
     }
+
+    pub(crate) fn add_field_is_used_more_than_once_err(
+        &mut self,
+        struct_key: FieldsStructKey,
+        field_id: IdKey,
+        first_use_span: Span,
+        second_use_span: Span,
+    ) {
+        let struct_info = self.ast.fields_structs[struct_key].info;
+
+        let msg = format!(
+            "الحقل `{}` تم استخدامه أكثر من مرة في تعبير الهيكل",
+            self.id_pool[field_id]
+        );
+
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            second_use_span.start,
+        );
+
+        code_window.mark_error(second_use_span, vec!["إعادة تعريف لهذا الحقل".into()]);
+        code_window.mark_secondary(first_use_span, vec!["تم استخدامه هنا لأول مرة".into()]);
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+        let note_msg = format!("تم تعريف الهيكل هنا");
+        let mut note_code_window = CodeWindow::new(
+            &self.files_infos[struct_info.file_key],
+            struct_info.id_span.start,
+        );
+        note_code_window.mark_note(struct_info.id_span, vec![]);
+        let note = Diagnostic::note(note_msg, vec![note_code_window]);
+
+        diagnostic.chain(note);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_missing_fields_in_struct_expr_err(
+        &mut self,
+        struct_key: FieldsStructKey,
+        missing_fields: ThinVec<IdKey>,
+        expr_span: Span,
+    ) {
+        let struct_info = self.ast.fields_structs[struct_key].info;
+        let struct_name = self.fmt_item_name(struct_info);
+        let missing_fields_list = missing_fields
+            .iter()
+            .map(|id| format!("`{}`", self.id_pool[*id]))
+            .collect::<Vec<_>>()
+            .join("، ");
+
+        let msg = format!("بعض الحقول مفقودة في تعريف الهيكل `{}`", struct_name);
+
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], expr_span.start);
+
+        code_window.mark_error(expr_span, vec!["يجب تضمين جميع الحقول المطلوبة".into()]);
+
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+        let note_msg = format!("تم تعريف الهيكل هنا");
+        let mut note_code_window = CodeWindow::new(
+            &self.files_infos[struct_info.file_key],
+            struct_info.id_span.start,
+        );
+        note_code_window.mark_note(struct_info.id_span, vec![]);
+        let note = Diagnostic::note(note_msg, vec![note_code_window]);
+
+        diagnostic.chain(note);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_unknown_field_in_struct_expr_err(
+        &mut self,
+        struct_key: FieldsStructKey,
+        field_id_key: IdKey,
+        field_id_expr_span: Span,
+    ) {
+        let struct_info = self.ast.fields_structs[struct_key].info;
+        let struct_name = self.fmt_item_name(struct_info);
+        let field_name = self.id_pool[field_id_key].clone();
+
+        let msg = format!(
+            "الحقل `{}` غير معروف في الهيكل `{}`",
+            field_name, struct_name
+        );
+
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            field_id_expr_span.start,
+        );
+
+        code_window.mark_error(
+            field_id_expr_span,
+            vec!["هذا الحقل غير موجود في بنية الهيكل".into()],
+        );
+
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+        let note_msg = format!("تم تعريف الهيكل هنا");
+        let mut note_code_window = CodeWindow::new(
+            &self.files_infos[struct_info.file_key],
+            struct_info.id_span.start,
+        );
+        note_code_window.mark_note(struct_info.id_span, vec![]);
+        let note = Diagnostic::note(note_msg, vec![note_code_window]);
+
+        diagnostic.chain(note);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_field_type_mismatch_err(
+        &mut self,
+        expected_ty: &Ty,
+        found_ty: &Ty,
+        struct_key: FieldsStructKey,
+        field_idx: u32,
+        field_id_expr_span: Span,
+        expr_span: Span,
+    ) {
+        let field_info = &self.ast.fields_structs[struct_key].fields[field_idx as usize];
+        let field_ast_id = field_info.id;
+        let field_ty_span = self.get_type_expr_span(field_info.typ);
+        let field_name = &self.id_pool[field_ast_id.id];
+
+        let struct_info = self.ast.fields_structs[struct_key].info;
+        let struct_name = self.fmt_item_name(struct_info);
+
+        let msg = format!(
+            "القيمة المقدمة للحقل `{}` للهيكل `{}` غير متوافقة مع النوع المتوقع",
+            field_name, struct_name
+        );
+
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            field_id_expr_span.start,
+        );
+
+        code_window.mark_error(
+            expr_span,
+            vec![format!(
+                "يُتوقّع `{}` ولكن تم العثور على `{}`",
+                self.fmt_ty(expected_ty),
+                self.fmt_ty(found_ty)
+            )],
+        );
+
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+        let note_msg = format!("تم تعريف الحقل هنا");
+        let mut note_code_window = CodeWindow::new(
+            &self.files_infos[struct_info.file_key],
+            field_ast_id.span.start,
+        );
+        note_code_window.mark_secondary(struct_info.id_span, vec![]);
+        note_code_window.mark_note(field_ast_id.span.merged_with(&field_ty_span), vec![]);
+        let note = Diagnostic::note(note_msg, vec![note_code_window]);
+
+        diagnostic.chain(note);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_filed_is_inaccessable_err(
+        &mut self,
+        struct_key: FieldsStructKey,
+        field_idx: u32,
+        field_id_expr_span: Span,
+    ) {
+        let struct_info = self.ast.fields_structs[struct_key].info;
+        let field_info = &self.ast.fields_structs[struct_key].fields[field_idx as usize];
+        let field_ast_id = field_info.id;
+        let field_name = &self.id_pool[field_ast_id.id];
+
+        let msg = format!("لا يمكن الوصول للحقل `{}`", field_name);
+
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            field_id_expr_span.start,
+        );
+
+        code_window.mark_error(field_id_expr_span, vec![]);
+
+        let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+        let note_msg = format!("تم تعريف الحقل هنا");
+        let mut note_code_window = CodeWindow::new(
+            &self.files_infos[struct_info.file_key],
+            field_ast_id.span.start,
+        );
+        note_code_window.mark_secondary(struct_info.id_span, vec![]);
+        note_code_window.mark_note(field_ast_id.span, vec![]);
+        let note = Diagnostic::note(note_msg, vec![note_code_window]);
+
+        diagnostic.chain(note);
+        self.diagnostics.push(diagnostic);
+    }
 }
