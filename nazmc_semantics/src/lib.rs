@@ -193,8 +193,37 @@ impl<'a> SemanticsAnalyzer<'a> {
                         &let_stm_type,
                     );
                 }
-                Stm::While(expr_key, scope_key) => todo!(),
-                Stm::If(if_expr) => todo!(),
+                Stm::While(while_stm) => {
+                    let WhileStm {
+                        while_keyword_span,
+                        cond_expr_key: while_cond_expr_key,
+                        scope_key: while_scope_key,
+                    } = **while_stm;
+
+                    let while_cond_ty = self.infer(while_cond_expr_key);
+
+                    if let Err(err) = self.s.unify(&Ty::boolean(), &while_cond_ty) {
+                        self.add_branch_stm_condition_type_mismatch_err(
+                            &while_cond_ty,
+                            "طالما",
+                            while_keyword_span,
+                            while_cond_expr_key,
+                        );
+                    }
+
+                    let while_scope_ty = self.infer_scope(while_scope_key);
+
+                    if let Err(err) = self.s.unify(&Ty::unit(), &while_scope_ty) {
+                        self.add_while_stm_should_return_unit_err(
+                            &while_scope_ty,
+                            while_keyword_span,
+                            while_scope_key,
+                        );
+                    }
+                }
+                Stm::If(if_expr) => {
+                    self.infer_if_expr(&if_expr);
+                }
                 Stm::Expr(expr_key) => {
                     self.infer(*expr_key);
                 }

@@ -1,5 +1,5 @@
 use crate::*;
-use nazmc_ast::{ASTId, ExprKind, FileKey, ScopeKey};
+use nazmc_ast::{ASTId, ExprKind, FileKey, ScopeEvent, ScopeKey};
 use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
 use nazmc_diagnostics::eprint_diagnostics;
 use std::{collections::HashMap, process::exit};
@@ -26,12 +26,13 @@ type FnParamsConflictsInFiles = HashMap<(IdKey, FileKey, Span), Vec<Span>>;
 //                                       |      The file key
 //                                       The conflicting param name in a file
 
-type BindingsConflicts = Vec<(IdKey, FileKey, Span)>;
-//                            ^^^^^  ^^^^^^^  ^^^^ The second span found
-//                            |      |
-//                            |      |
-//                            |      The file key
-//                            The conflicting param name in a file
+type BindingsConflicts = HashMap<(FileKey, Span), (IdKey, Span)>;
+//                                ^^^^^^   ^^^^    ^^^^   ^^^^ The second span found
+//                                |        |       |
+//                                |        |       The conflicting param name in a file
+//                                |        The first span found
+//                                The file key
+//
 
 type ItemsAndImportsConflictsInFiles = HashMap<(IdKey, FileKey), Vec<Span>>;
 //                                              ^^^^^  ^^^^^^^       ^^^^ spans found
@@ -421,9 +422,6 @@ impl<'a> ASTValidator<'a> {
 
                     let scope_key = self.lower_lambda_as_body(f.body.unwrap());
 
-                    self.ast.scopes[scope_key].extra_params =
-                        params.iter().map(|param| param.0.id).collect();
-
                     let key = self.ast.fns.push_and_get_key(nazmc_ast::Fn {
                         info,
                         params,
@@ -462,7 +460,8 @@ impl<'a> ASTValidator<'a> {
                     nazmc_ast::Item::Fn { key, .. } => self.ast.fns[key].info,
                     nazmc_ast::Item::Pkg
                     | nazmc_ast::Item::LocalVar { .. }
-                    | nazmc_ast::Item::ScopeParam { .. } => {
+                    | nazmc_ast::Item::FnParam { .. }
+                    | nazmc_ast::Item::LambdaParam { .. } => {
                         unreachable!()
                     }
                 };
@@ -824,13 +823,10 @@ impl<'a> ASTValidator<'a> {
             let stm = match stm.unwrap() {
                 Stm::Semicolon(_) => continue,
                 Stm::Let(let_stm) => {
-                    let binding = self.lower_binding(let_stm.binding.unwrap());
+                    let mut bound_names_map = HashMap::new();
 
-                    let mut bound_names = vec![];
-
-                    nazmc_ast::expand_names_binding(&binding.kind, &mut bound_names);
-
-                    self.check_bound_names(bound_names);
+                    let binding =
+                        self.lower_binding(let_stm.binding.unwrap(), &mut bound_names_map);
 
                     let assign = let_stm.let_assign.map(|a| self.lower_expr(a.expr.unwrap()));
 
@@ -838,15 +834,25 @@ impl<'a> ASTValidator<'a> {
 
                     let let_stm_key = self.ast.lets.push_and_get_key(let_stm);
 
+                    self.ast.state.bound_lets_names.push(bound_names_map);
+
                     self.ast.state.scope_events[self.current_scope_key]
                         .push(nazmc_ast::ScopeEvent::Let(let_stm_key));
 
                     nazmc_ast::Stm::Let(let_stm_key)
                 }
-                Stm::While(while_stm) => nazmc_ast::Stm::While(
-                    self.lower_expr(while_stm.conditional_block.condition.unwrap()),
-                    self.lower_lambda_as_body(while_stm.conditional_block.block.unwrap()),
-                ),
+                Stm::While(while_stm) => {
+                    let cond_expr_key =
+                        self.lower_expr(while_stm.conditional_block.condition.unwrap());
+                    let scope_key =
+                        self.lower_lambda_as_body(while_stm.conditional_block.block.unwrap());
+
+                    nazmc_ast::Stm::While(Box::new(nazmc_ast::WhileStm {
+                        while_keyword_span: while_stm.while_keyword.span,
+                        cond_expr_key,
+                        scope_key,
+                    }))
+                }
                 Stm::If(if_expr) => nazmc_ast::Stm::If(Box::new(self.lower_if_expr(if_expr))),
                 Stm::When(_when_expr) => todo!(),
                 Stm::Expr(stm) => nazmc_ast::Stm::Expr(self.lower_expr(stm.expr)),
@@ -859,44 +865,71 @@ impl<'a> ASTValidator<'a> {
         self.ast.scopes[self.current_scope_key].return_expr = return_expr;
 
         let scope_key = self.current_scope_key;
+
         self.current_scope_key = last_scope_key;
+
+        self.ast.state.scope_events[self.current_scope_key]
+            .push(nazmc_ast::ScopeEvent::Scope(scope_key));
+
         scope_key
     }
 
-    fn check_bound_names(&mut self, mut bound_names: Vec<&ASTId>) {
-        bound_names.sort_by_key(|n| n.id);
-
-        bound_names
-            .chunk_by(|a, b| a.id == b.id)
-            .for_each(|chunck| {
-                if chunck.len() != 1 {
-                    self.bindings_conflicts
-                        .push((chunck[0].id, self.file_key, chunck[1].span));
-                }
-            });
-    }
-
-    fn lower_binding(&mut self, binding: Binding) -> nazmc_ast::Binding {
-        let kind = self.lower_binding_kind(binding.kind);
+    fn lower_binding(
+        &mut self,
+        binding: Binding,
+        bound_names_map: &mut HashMap<IdKey, Span>,
+    ) -> nazmc_ast::Binding {
+        let kind = self.lower_binding_kind(binding.kind, bound_names_map);
 
         let typ = binding.typ.map(|t| self.lower_type(t.typ.unwrap()));
 
         nazmc_ast::Binding { kind, typ }
     }
 
-    fn lower_binding_kind(&mut self, kind: BindingKind) -> nazmc_ast::BindingKind {
+    fn lower_binding_kind(
+        &mut self,
+        kind: BindingKind,
+        bound_names_map: &mut HashMap<IdKey, Span>,
+    ) -> nazmc_ast::BindingKind {
         match kind {
-            BindingKind::Id(id) => nazmc_ast::BindingKind::Id(nazmc_ast::ASTId {
-                span: id.span,
-                id: id.data.val,
-            }),
-            BindingKind::MutId(mut_id) => nazmc_ast::BindingKind::MutId {
-                id: nazmc_ast::ASTId {
-                    span: mut_id.id.as_ref().unwrap().span,
-                    id: mut_id.id.unwrap().data.val,
-                },
-                mut_span: mut_id.mut_keyword.span,
-            },
+            BindingKind::Id(id_token) => {
+                let id_key = id_token.data.val;
+                let id_span = id_token.span;
+
+                if let Some(first_span) = bound_names_map.get(&id_key) {
+                    self.bindings_conflicts
+                        .entry((self.file_key, *first_span))
+                        .or_insert((id_key, id_span));
+                } else {
+                    bound_names_map.insert(id_key, id_span);
+                }
+
+                nazmc_ast::BindingKind::Id(nazmc_ast::ASTId {
+                    span: id_span,
+                    id: id_key,
+                })
+            }
+            BindingKind::MutId(mut_id_binding) => {
+                let id_token = mut_id_binding.id.unwrap();
+                let id_key = id_token.data.val;
+                let id_span = id_token.span;
+
+                if let Some(first_span) = bound_names_map.get(&id_key) {
+                    self.bindings_conflicts
+                        .entry((self.file_key, *first_span))
+                        .or_insert((id_key, id_span));
+                } else {
+                    bound_names_map.insert(id_key, id_span);
+                };
+
+                nazmc_ast::BindingKind::MutId {
+                    id: nazmc_ast::ASTId {
+                        span: id_span,
+                        id: id_key,
+                    },
+                    mut_span: mut_id_binding.mut_keyword.span,
+                }
+            }
             BindingKind::Destructed(destructed_tuple) => {
                 let span = destructed_tuple
                     .open_delim
@@ -911,7 +944,7 @@ impl<'a> ASTValidator<'a> {
                     trailing_comma,
                 }) = destructed_tuple.items
                 {
-                    let first = self.lower_binding_kind(first_item.unwrap());
+                    let first = self.lower_binding_kind(first_item.unwrap(), bound_names_map);
 
                     if trailing_comma.is_none() && rest_items.is_empty() {
                         return first;
@@ -920,7 +953,7 @@ impl<'a> ASTValidator<'a> {
                     destructed_bindings.push(first);
 
                     for r in rest_items {
-                        let r = self.lower_binding_kind(r.unwrap().item);
+                        let r = self.lower_binding_kind(r.unwrap().item, bound_names_map);
                         destructed_bindings.push(r);
                     }
                 }
@@ -1508,8 +1541,10 @@ impl<'a> ASTValidator<'a> {
             .span
             .merged_with(&lambda_expr.close_curly.unwrap().span);
 
-        let body =
+        let lambda_scope_key =
             self.lower_lambda_stms_and_return_expr(lambda_expr.stms, lambda_expr.last_expr, span);
+
+        let mut bound_names_map = HashMap::new();
 
         let lambda = if let Some(arrow) = lambda_expr.lambda_arrow {
             let mut params = ThinVec::new();
@@ -1521,15 +1556,18 @@ impl<'a> ASTValidator<'a> {
                 r_arrow: _,
             }) = arrow
             {
-                let first = self.lower_binding(first);
+                let first = self.lower_binding(first, &mut bound_names_map);
                 params.push(first);
 
                 for r in rest {
-                    params.push(self.lower_binding(r.item));
+                    params.push(self.lower_binding(r.item, &mut bound_names_map));
                 }
             }
 
-            nazmc_ast::LambdaExpr { params, body }
+            nazmc_ast::LambdaExpr {
+                params,
+                body: lambda_scope_key,
+            }
         } else {
             let mut params = ThinVec::new();
             params.push(nazmc_ast::Binding {
@@ -1539,19 +1577,16 @@ impl<'a> ASTValidator<'a> {
                 }),
                 typ: None,
             });
-            nazmc_ast::LambdaExpr { params, body }
+            nazmc_ast::LambdaExpr {
+                params,
+                body: lambda_scope_key,
+            }
         };
 
-        let mut bound_names = vec![];
-
-        for param_binding in &lambda.params {
-            nazmc_ast::expand_names_binding(&param_binding.kind, &mut bound_names);
-        }
-
-        self.ast.scopes[self.current_scope_key].extra_params =
-            bound_names.iter().map(|ast_id| ast_id.id).collect();
-
-        self.check_bound_names(bound_names);
+        self.ast
+            .state
+            .bound_lambdas_names
+            .insert(lambda_scope_key, bound_names_map);
 
         self.new_expr(span, nazmc_ast::ExprKind::Lambda(Box::new(lambda)))
     }
@@ -1560,9 +1595,6 @@ impl<'a> ASTValidator<'a> {
         let if_condition = self.lower_expr(if_expr.conditional_block.condition.unwrap());
         let if_body = self.lower_lambda_as_body(if_expr.conditional_block.block.unwrap());
 
-        self.ast.state.scope_events[self.current_scope_key]
-            .push(nazmc_ast::ScopeEvent::Scope(if_body));
-
         let if_ = (if_expr.if_keyword.span, if_condition, if_body);
 
         let mut else_ifs = ThinVec::new();
@@ -1570,9 +1602,6 @@ impl<'a> ASTValidator<'a> {
         for else_if in if_expr.else_ifs {
             let condition = self.lower_expr(else_if.conditional_block.condition.unwrap());
             let body = self.lower_lambda_as_body(else_if.conditional_block.block.unwrap());
-
-            self.ast.state.scope_events[self.current_scope_key]
-                .push(nazmc_ast::ScopeEvent::Scope(body));
 
             else_ifs.push((
                 else_if
@@ -1586,8 +1615,6 @@ impl<'a> ASTValidator<'a> {
 
         let else_ = if_expr.else_cluase.map(|e| {
             let body = self.lower_lambda_as_body(e.block.unwrap());
-            self.ast.state.scope_events[self.current_scope_key]
-                .push(nazmc_ast::ScopeEvent::Scope(body));
             (e.else_keyword.span, body)
         });
 
@@ -1676,7 +1703,7 @@ impl<'a> ASTValidator<'a> {
             diagnostics.push(diagnostic);
         }
 
-        for (id_key, file_key, sec_span) in self.bindings_conflicts {
+        for ((file_key, first_span), (id_key, sec_span)) in self.bindings_conflicts {
             let file_info = &files_infos[file_key];
 
             let name = &id_pool[id_key];
@@ -1685,7 +1712,9 @@ impl<'a> ASTValidator<'a> {
 
             let mut code_window = CodeWindow::new(file_info, sec_span.start);
 
-            code_window.mark_error(sec_span, vec!["تم حجزه أكثر من مرة".to_string()]);
+            code_window.mark_secondary(first_span, vec!["تم حجز الاسم هنا أول مرة".into()]);
+
+            code_window.mark_error(sec_span, vec!["تم حجز الاسم هنا للمرة الثانية".to_string()]);
 
             let diangostic = Diagnostic::error(msg, vec![code_window]);
 

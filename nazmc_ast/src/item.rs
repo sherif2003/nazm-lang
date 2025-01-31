@@ -37,8 +37,12 @@ pub enum Item {
         id: IdKey,
         key: LetStmKey,
     },
-    ScopeParam {
+    FnParam {
         idx: u32,
+        fn_key: FnKey,
+    },
+    LambdaParam {
+        id: IdKey,
         scope_key: ScopeKey,
     },
 }

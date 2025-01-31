@@ -53,6 +53,10 @@ pub struct Unresolved {
     pub paths: ASTPaths,
     /// All scope events
     pub scope_events: TiVec<ScopeKey, ThinVec<ScopeEvent>>,
+    /// All bound names in all let stms
+    pub bound_lets_names: TiVec<LetStmKey, HashMap<IdKey, Span>>,
+    /// All bound params names in all lambda expressions scopes
+    pub bound_lambdas_names: HashMap<ScopeKey, HashMap<IdKey, Span>>,
 }
 
 /// Holds resolved paths
@@ -204,44 +208,8 @@ impl BindingKind {
     pub fn get_span(&self) -> Span {
         match self {
             BindingKind::Id(astid) => astid.span,
-            BindingKind::MutId { id, mut_span } => id.span,
+            BindingKind::MutId { id, mut_span: _ } => id.span,
             BindingKind::Tuple(_, span) => *span,
-        }
-    }
-}
-
-pub fn expand_names_binding<'b>(kind: &'b BindingKind, bound_names: &mut Vec<&'b ASTId>) {
-    match kind {
-        BindingKind::Id(id) => {
-            bound_names.push(id);
-        }
-        BindingKind::MutId { id, .. } => {
-            bound_names.push(id);
-        }
-        BindingKind::Tuple(bindings, ..) => {
-            for binding_kind in bindings {
-                expand_names_binding(binding_kind, bound_names);
-            }
-        }
-    }
-}
-
-pub fn expand_names_binding_owned(
-    kind: &BindingKind,
-    bound_names: &mut Vec<(IdKey, LetStmKey)>,
-    let_stm_key: LetStmKey,
-) {
-    match kind {
-        BindingKind::Id(ast_id) => {
-            bound_names.push((ast_id.id, let_stm_key));
-        }
-        BindingKind::MutId { id, .. } => {
-            bound_names.push((id.id, let_stm_key));
-        }
-        BindingKind::Tuple(bindings, ..) => {
-            for binding_kind in bindings {
-                expand_names_binding_owned(binding_kind, bound_names, let_stm_key);
-            }
         }
     }
 }
@@ -309,7 +277,6 @@ pub struct Fn {
 
 #[derive(Clone, Default)]
 pub struct Scope {
-    pub extra_params: Vec<IdKey>,
     pub stms: ThinVec<Stm>,
     pub return_expr: Option<ExprKey>,
     pub span: Span,
@@ -325,7 +292,7 @@ pub enum ScopeEvent {
 #[derive(Clone)]
 pub enum Stm {
     Let(LetStmKey),
-    While(ExprKey, ScopeKey),
+    While(Box<WhileStm>),
     If(Box<IfExpr>),
     Expr(ExprKey),
 }
@@ -334,6 +301,13 @@ pub enum Stm {
 pub struct LetStm {
     pub binding: Binding,
     pub assign: Option<ExprKey>,
+}
+
+#[derive(Clone)]
+pub struct WhileStm {
+    pub while_keyword_span: Span,
+    pub cond_expr_key: ExprKey,
+    pub scope_key: ScopeKey,
 }
 
 #[derive(Clone, Default)]

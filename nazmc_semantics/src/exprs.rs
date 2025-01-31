@@ -43,7 +43,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 // TODO: Remove the clone
                 self.infer_fields_struct_expr(&fields_struct_expr.clone(), expr_key)
             }
-            ExprKind::If(if_expr) => self.infer_if_expr(&if_expr.clone(), expr_key), // TODO: Remove the clone
+            ExprKind::If(if_expr) => self.infer_if_expr(&if_expr.clone()), // TODO: Remove the clone
             ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
             ExprKind::Field(field_expr) => {
                 self.infer_field_expr(&field_expr.clone(), expr_key) // TODO: Remove the clone
@@ -113,7 +113,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 .bindings
                 .get(&id)
                 .unwrap(),
-            Item::ScopeParam { idx, scope_key } => {
+            Item::FnParam { idx, fn_key: _ } => {
                 // TODO: Lambda params
                 let Type::FnPtr(FnPtrType {
                     params_types,
@@ -442,22 +442,22 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
-    fn infer_if_expr(
+    pub(crate) fn infer_if_expr(
         &mut self,
         IfExpr {
             if_: (if_keyword_span, if_cond_expr_key, if_scope_key),
             else_ifs,
             else_,
         }: &IfExpr,
-        expr_key: ExprKey,
     ) -> Ty {
         let if_cond_ty = self.infer(*if_cond_expr_key);
 
         if let Err(err) = self.s.unify(&Ty::boolean(), &if_cond_ty) {
-            self.add_type_mismatch_err(
-                &Ty::boolean(),
+            self.add_branch_stm_condition_type_mismatch_err(
                 &if_cond_ty,
-                self.get_expr_span(*if_cond_expr_key),
+                "لو",
+                *if_keyword_span,
+                *if_cond_expr_key,
             );
         }
 
@@ -467,10 +467,11 @@ impl<'a> SemanticsAnalyzer<'a> {
             let else_if_cond_ty = self.infer(*if_cond_expr_key);
 
             if let Err(err) = self.s.unify(&Ty::boolean(), &else_if_cond_ty) {
-                self.add_type_mismatch_err(
-                    &Ty::boolean(),
+                self.add_branch_stm_condition_type_mismatch_err(
                     &else_if_cond_ty,
-                    self.get_expr_span(*else_if_cond_expr_key),
+                    "وإلا لو",
+                    *else_if_keyword_span,
+                    *else_if_cond_expr_key,
                 );
             }
 

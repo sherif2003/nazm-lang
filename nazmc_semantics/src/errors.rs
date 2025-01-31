@@ -155,6 +155,35 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.ast.exprs[expr_key].span
     }
 
+    pub(crate) fn add_while_stm_should_return_unit_err(
+        &mut self,
+        found_ty: &Ty,
+        while_keyword_span: Span,
+        while_scope_key: ScopeKey,
+    ) {
+        let return_expr_span =
+            self.get_expr_span(self.ast.scopes[while_scope_key].return_expr.unwrap());
+
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            return_expr_span.start,
+        );
+
+        code_window.mark_secondary(while_keyword_span, vec![]);
+        code_window.mark_error(
+            return_expr_span,
+            vec![format!(
+                "يُتوقّع النوع `()` ولكن تم العثور على النوع `{}`",
+                self.fmt_ty(found_ty)
+            )],
+        );
+        let diagnostic = Diagnostic::error(
+            "جملة `طالما` يجب ألّا ترجع قيمة أو ترجع قيمة من نوع `()`".into(),
+            vec![code_window],
+        );
+        self.diagnostics.push(diagnostic);
+    }
+
     pub(crate) fn add_type_mismatch_in_let_stm_err(
         &mut self,
         expected_ty: &Ty,
@@ -604,6 +633,35 @@ impl<'a> SemanticsAnalyzer<'a> {
         let note = Diagnostic::note(note_msg, vec![note_code_window]);
 
         diagnostic.chain(note);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_branch_stm_condition_type_mismatch_err(
+        &mut self,
+        found_ty: &Ty,
+        keyword: &'static str,
+        keyword_span: Span,
+        cond_expr_key: ExprKey,
+    ) {
+        let cond_expr_span = self.get_expr_span(cond_expr_key);
+        let mut code_window = CodeWindow::new(
+            &self.files_infos[self.current_file_key],
+            cond_expr_span.start,
+        );
+
+        // TODO: Conditions may be of pointer types
+        code_window.mark_secondary(keyword_span, vec![]);
+        code_window.mark_error(
+            cond_expr_span,
+            vec![format!(
+                "يُتوقّع النوع `شرط` ولكن تم العثور على النوع `{}`",
+                self.fmt_ty(found_ty)
+            )],
+        );
+        let diagnostic = Diagnostic::error(
+            format!("نوع شرط `{}` يجب أن يكون من النوع `شرط`", keyword),
+            vec![code_window],
+        );
         self.diagnostics.push(diagnostic);
     }
 

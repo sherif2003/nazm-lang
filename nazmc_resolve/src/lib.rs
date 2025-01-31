@@ -259,6 +259,7 @@ impl<'a> NameResolver<'a> {
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
+                Some(fn_key),
                 scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
@@ -277,6 +278,7 @@ impl<'a> NameResolver<'a> {
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
+                None,
                 scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
@@ -295,6 +297,7 @@ impl<'a> NameResolver<'a> {
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
+                None,
                 scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
@@ -312,6 +315,7 @@ impl<'a> NameResolver<'a> {
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
+                None,
                 scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
@@ -352,69 +356,93 @@ impl<'a> NameResolver<'a> {
     fn resolve_paths_in_scope(
         &mut self,
         at: FileKey,
-        names_stack: &mut Vec<(IdKey, LetStmKey)>,
+        lets_haystacks: &mut Vec<LetStmKey>,
+        fn_key: Option<FnKey>,
         scope_key: ScopeKey,
         paths: &TiSlice<PathNoPkgKey, (ASTId, PkgKey)>,
         resolved_paths: &mut TiSlice<PathNoPkgKey, Item>,
         resolved_imports: &TiSlice<FileKey, HashMap<IdKey, ResolvedImport>>,
         resolved_star_imports: &TiSlice<FileKey, ThinVec<ResolvedStarImport>>,
     ) {
-        let stack_start_idx = names_stack.len();
+        let stack_start_idx = lets_haystacks.len();
 
         // Take the ownershp temporarily
         let scope = std::mem::take(&mut self.ast.scopes[scope_key]);
 
-        // Scope events aree in unresolved state of AST, so, there is no need to restore the ownership
+        // Scope events are in unresolved state of AST, so, there is no need to restore the ownership
         'label: for event in std::mem::take(&mut self.ast.state.scope_events[scope_key]) {
             match event {
                 nazmc_ast::ScopeEvent::Let(let_stm_key) => {
-                    let let_stm = &self.ast.lets[let_stm_key];
-                    nazmc_ast::expand_names_binding_owned(
-                        &let_stm.binding.kind,
-                        names_stack,
-                        let_stm_key,
-                    );
+                    lets_haystacks.push(let_stm_key);
                 }
                 nazmc_ast::ScopeEvent::Path(path_no_pkg_key) => {
                     let path_expr = &paths[path_no_pkg_key];
+                    let needle_id_key = path_expr.0.id;
 
                     // Iterate over names_stack in reverse, from stack_start_idx to the end.
-                    if let Some(&(name, let_stm_key)) = names_stack[stack_start_idx..]
-                        .iter()
-                        .rev()
-                        .find(|&&(name, _)| name == path_expr.0.id)
+                    if let Some(&let_stm_key) =
+                        lets_haystacks[stack_start_idx..]
+                            .iter()
+                            .rev()
+                            .find(|&&let_stm_key| {
+                                self.ast.state.bound_lets_names[let_stm_key]
+                                    .contains_key(&needle_id_key)
+                            })
                     {
                         resolved_paths[path_no_pkg_key] = Item::LocalVar {
-                            id: name,
+                            id: needle_id_key,
                             key: let_stm_key,
                         };
                         continue 'label;
                     }
 
-                    // Check if the path exists in extra_params and resolve it if found.
-                    if let Some(idx) = scope
-                        .extra_params
-                        .iter()
-                        .position(|&name| name == path_expr.0.id)
+                    // Check if current scope is a lambda expression, and then check if it contains the needle id key
+                    if self
+                        .ast
+                        .state
+                        .bound_lambdas_names
+                        .get(&scope_key)
+                        .is_some_and(|bound_lambda_names| {
+                            bound_lambda_names.contains_key(&needle_id_key)
+                        })
                     {
-                        resolved_paths[path_no_pkg_key] = Item::ScopeParam {
-                            idx: idx as u32,
+                        resolved_paths[path_no_pkg_key] = Item::LambdaParam {
+                            id: needle_id_key,
                             scope_key,
                         };
                         continue 'label;
                     }
 
                     // Iterate over names_stack in reverse, from index `stack_start_idx - 1` to the beginning.
-                    if let Some(&(name, let_stm_key)) = names_stack[..stack_start_idx]
-                        .iter()
-                        .rev()
-                        .find(|&&(name, _)| name == path_expr.0.id)
+                    if let Some(&let_stm_key) =
+                        lets_haystacks[..stack_start_idx]
+                            .iter()
+                            .rev()
+                            .find(|&&let_stm_key| {
+                                self.ast.state.bound_lets_names[let_stm_key]
+                                    .contains_key(&needle_id_key)
+                            })
                     {
                         resolved_paths[path_no_pkg_key] = Item::LocalVar {
-                            id: name,
+                            id: needle_id_key,
                             key: let_stm_key,
                         };
                         continue 'label;
+                    }
+
+                    // Searching in fn params
+                    if let (Some(fn_key), 0) = (fn_key, stack_start_idx) {
+                        if let Some(idx) = self.ast.fns[fn_key]
+                            .params
+                            .iter()
+                            .position(|(ASTId { span: _, id }, _)| *id == path_expr.0.id)
+                        {
+                            resolved_paths[path_no_pkg_key] = Item::FnParam {
+                                idx: idx as u32,
+                                fn_key,
+                            };
+                            continue 'label;
+                        }
                     }
 
                     resolved_paths[path_no_pkg_key] = self
@@ -437,7 +465,8 @@ impl<'a> NameResolver<'a> {
                 nazmc_ast::ScopeEvent::Scope(scope_key) => {
                     self.resolve_paths_in_scope(
                         at,
-                        names_stack,
+                        lets_haystacks,
+                        fn_key,
                         scope_key,
                         paths,
                         resolved_paths,
@@ -451,7 +480,7 @@ impl<'a> NameResolver<'a> {
         // Restore the ownership
         self.ast.scopes[scope_key] = scope;
 
-        names_stack.truncate(stack_start_idx);
+        lets_haystacks.truncate(stack_start_idx);
     }
 
     fn resolve_non_pkg_item_path(
@@ -851,7 +880,10 @@ impl<'a> NameResolver<'a> {
 
         if !matches!(
             item,
-            Item::Pkg | Item::LocalVar { .. } | Item::ScopeParam { .. }
+            Item::Pkg
+                | Item::LocalVar { .. }
+                | Item::FnParam { .. }
+                | nazmc_ast::Item::LambdaParam { .. }
         ) {
             let help = self.help_diagnostic_to_find_item(item);
             diagnostic.chain(help);
@@ -1041,7 +1073,10 @@ impl<'a> NameResolver<'a> {
             Item::Const { key, .. } => self.ast.consts[key].info,
             Item::Static { key, .. } => self.ast.statics[key].info,
             Item::Fn { key, .. } => self.ast.fns[key].info,
-            Item::Pkg | Item::LocalVar { .. } | Item::ScopeParam { .. } => {
+            Item::Pkg
+            | Item::LocalVar { .. }
+            | Item::FnParam { .. }
+            | nazmc_ast::Item::LambdaParam { .. } => {
                 unreachable!()
             }
         }
@@ -1064,7 +1099,9 @@ fn item_kind_to_str(item: Item) -> &'static str {
         Item::Const { .. } => "ثابت",
         Item::Static { .. } => "مشترك",
         Item::Fn { .. } => "دالة",
-        Item::LocalVar { .. } | Item::ScopeParam { .. } => unreachable!(),
+        Item::LocalVar { .. } | Item::FnParam { .. } | nazmc_ast::Item::LambdaParam { .. } => {
+            unreachable!()
+        }
     }
 }
 
@@ -1077,6 +1114,8 @@ fn explicit_item_kind_to_str(item: Item) -> &'static str {
         Item::Const { .. } => "ثابت",
         Item::Static { .. } => "مشترك",
         Item::Fn { .. } => "دالة",
-        Item::LocalVar { .. } | Item::ScopeParam { .. } => unreachable!(),
+        Item::LocalVar { .. } | Item::FnParam { .. } | nazmc_ast::Item::LambdaParam { .. } => {
+            unreachable!()
+        }
     }
 }
