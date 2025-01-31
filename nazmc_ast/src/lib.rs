@@ -41,10 +41,6 @@ new_data_pool_key! { ScopeKey }
 new_data_pool_key! { LetStmKey }
 new_data_pool_key! { ExprKey }
 
-impl LetStmKey {
-    pub const FN_PARAMS_STM: Self = Self(0);
-}
-
 pub type PkgPoolBuilder = DataPoolBuilder<PkgKey, ThinVec<IdKey>>;
 
 pub const TOP_PKG_KEY: PkgKey = PkgKey(0);
@@ -117,20 +113,8 @@ impl AST<Unresolved> {
             ..Default::default()
         };
 
-        let fn_params_let_stm = LetStm {
-            binding: Binding {
-                kind: BindingKind::Id(ASTId {
-                    span: Default::default(),
-                    id: Default::default(),
-                }),
-                typ: None,
-            },
-            assign: None,
-        };
-
         Self {
             state,
-            lets: ti_vec![fn_params_let_stm; 1],
             ..Default::default()
         }
     }

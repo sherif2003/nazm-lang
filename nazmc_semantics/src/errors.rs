@@ -155,6 +155,36 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.ast.exprs[expr_key].span
     }
 
+    pub(crate) fn add_type_mismatch_in_let_stm_err(
+        &mut self,
+        expected_ty: &Ty,
+        found_ty: &Ty,
+        expected_type_expr_key: TypeExprKey,
+        expr_key: ExprKey,
+    ) {
+        let expected_span = self.get_type_expr_span(expected_type_expr_key);
+        let found_span = self.get_expr_span(expr_key);
+        let expected_ty = self.fmt_ty(expected_ty);
+
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], found_span.start);
+
+        code_window.mark_secondary(
+            expected_span,
+            vec![format!("تم تعريف النوع `{}` هنا", expected_ty)],
+        );
+        code_window.mark_error(
+            found_span,
+            vec![format!(
+                "يُتوقّع النوع `{}` ولكن تم العثور على النوع `{}`",
+                expected_ty,
+                self.fmt_ty(found_ty)
+            )],
+        );
+        let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![code_window]);
+        self.diagnostics.push(diagnostic);
+    }
+
     pub(crate) fn add_type_mismatch_err(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
         let mut code_window = CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
         code_window.mark_error(

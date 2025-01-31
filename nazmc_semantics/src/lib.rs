@@ -47,6 +47,7 @@ pub struct SemanticsAnalyzer<'a> {
     diagnostics: Vec<Diagnostic<'a>>,
     cycle_stack: Vec<Diagnostic<'a>>,
     current_file_key: FileKey,
+    current_fn_key: FnKey,
     s: Substitution,
 }
 
@@ -92,8 +93,9 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         // TODO: Remove the clone
         // Don't take the ownership as the errors module requires the access to them
-        for _fn in &self.ast.fns.clone() {
+        for (fn_key, _fn) in self.ast.fns.clone().iter_enumerated() {
             self.current_file_key = _fn.info.file_key;
+            self.current_fn_key = fn_key;
             self.analyze_scope(_fn.scope_key);
         }
 
@@ -166,10 +168,15 @@ impl<'a> SemanticsAnalyzer<'a> {
                     if let Some(expr_key) = self.ast.lets[*let_stm_key].assign {
                         let expr_ty = self.infer(expr_key);
 
-                        let expr_span = self.get_expr_span(expr_key);
-
                         if let Err(err) = self.s.unify(&let_stm_type, &expr_ty) {
-                            self.add_type_mismatch_err(&let_stm_type, &expr_ty, expr_span);
+                            let expected_type_expr_key =
+                                self.ast.lets[*let_stm_key].binding.typ.unwrap();
+                            self.add_type_mismatch_in_let_stm_err(
+                                &let_stm_type,
+                                &expr_ty,
+                                expected_type_expr_key,
+                                expr_key,
+                            );
                         }
                     }
 

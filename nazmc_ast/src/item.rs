@@ -1,8 +1,8 @@
 use nazmc_data_pool::IdKey;
 
 use crate::{
-    ConstKey, FieldsStructKey, FnKey, LetStmKey, StaticKey, TupleStructKey, UnitStructKey,
-    VisModifier,
+    ConstKey, FieldsStructKey, FnKey, LetStmKey, ScopeKey, StaticKey, TupleStructKey,
+    UnitStructKey, VisModifier,
 };
 
 #[derive(Clone, Copy, Default, Debug)]
@@ -36,5 +36,9 @@ pub enum Item {
     LocalVar {
         id: IdKey,
         key: LetStmKey,
+    },
+    ScopeParam {
+        idx: u32,
+        scope_key: ScopeKey,
     },
 }

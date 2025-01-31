@@ -113,6 +113,18 @@ impl<'a> SemanticsAnalyzer<'a> {
                 .bindings
                 .get(&id)
                 .unwrap(),
+            Item::ScopeParam { idx, scope_key } => {
+                // TODO: Lambda params
+                let Type::FnPtr(FnPtrType {
+                    params_types,
+                    return_type: _,
+                }) = &*self.typed_ast.fns_signatures[&self.current_fn_key].borrow()
+                else {
+                    unreachable!()
+                };
+
+                return params_types[idx as usize].clone();
+            }
             _ => unreachable!(),
         };
 
@@ -145,6 +157,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let parens_span = *parens_span;
 
         let on_expr_ty = self.infer(on);
+        let on_expr_ty = self.s.apply(&on_expr_ty);
 
         let (params_types, return_type, is_fn) = match on_expr_ty.inner() {
             Type::FnPtr(FnPtrType {
@@ -233,6 +246,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let brackets_span = *brackets_span;
 
         let on_expr_ty = self.infer(on);
+        let on_expr_ty = self.s.apply(&on_expr_ty);
 
         let (underlying_ty, is_array) = match on_expr_ty.inner() {
             Type::Array(ArrayType {
@@ -261,7 +275,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         let idx_ty = self.infer(*idx);
 
-        // TODO: Support ranges nidecies
+        // TODO: Support ranges idexing
         if let Err(err) = self.s.unify(&Ty::u(), &idx_ty) {
             self.add_type_mismatch_err(&Ty::u(), &idx_ty, self.get_expr_span(*idx));
         }
@@ -301,7 +315,9 @@ impl<'a> SemanticsAnalyzer<'a> {
     ) -> Ty {
         let on = *on;
         let idx = *idx;
+
         let on_expr_ty = self.infer(on);
+        let on_expr_ty = self.s.apply(&on_expr_ty);
 
         match on_expr_ty.inner() {
             Type::Tuple(TupleType { types }) => {
@@ -494,7 +510,9 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     fn infer_field_expr(&mut self, FieldExpr { on, name }: &FieldExpr, expr_key: ExprKey) -> Ty {
         let on = *on;
+
         let on_expr_ty = self.infer(on);
+        let on_expr_ty = self.s.apply(&on_expr_ty);
 
         // TODO: Support methods and the length method on slices
         match on_expr_ty.inner() {
