@@ -49,14 +49,8 @@ impl<T: Clone> RcCell<T> {
 
 pub type Ty = RcCell<Type>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
-    #[default]
-    Unknown,
-    Never,
-    UnspecifiedUnsignedInt,
-    UnspecifiedSignedInt,
-    UnspecifiedFloat,
     TypeVar(TypeVarKey),
     Slice(Ty),
     Ptr(Ty),
@@ -70,9 +64,16 @@ pub enum Type {
     Concrete(ConcreteType),
 }
 
+impl Default for Type {
+    fn default() -> Self {
+        Self::Concrete(ConcreteType::Unit)
+    }
+}
+
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub enum ConcreteType {
     #[default]
+    Never,
     Unit,
     I,
     I1,
@@ -152,31 +153,6 @@ pub struct LetStm {
 }
 
 impl Ty {
-    /// Create a new `Unknown` type.
-    pub fn unknown() -> Self {
-        Self::new(Type::Unknown)
-    }
-
-    /// Create a `Never` type.
-    pub fn never() -> Self {
-        Self::new(Type::Never)
-    }
-
-    /// Create a new `UnspecifiedUnsignedInt` type.
-    pub fn unspecified_unsigned_int() -> Self {
-        Self::new(Type::UnspecifiedUnsignedInt)
-    }
-
-    /// Create a new `UnspecifiedSignedInt` type.
-    pub fn unspecified_signed_int() -> Self {
-        Self::new(Type::UnspecifiedSignedInt)
-    }
-
-    /// Create a new `UnspecifiedFloat` type.
-    pub fn unspecified_float() -> Self {
-        Self::new(Type::UnspecifiedFloat)
-    }
-
     /// Create a new `TypeVar` type with the given key.
     pub fn type_var(ty_var_key: TypeVarKey) -> Self {
         Self::new(Type::TypeVar(ty_var_key))
@@ -241,6 +217,11 @@ impl Ty {
             params_types: params.into_iter().collect(),
             return_type,
         }))
+    }
+
+    /// Create a `ConcreteType::Never` type.
+    pub fn never() -> Self {
+        Self::concrete(ConcreteType::Never)
     }
 
     /// Create a `ConcreteType::Unit` type.

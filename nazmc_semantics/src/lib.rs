@@ -97,16 +97,32 @@ impl<'a> SemanticsAnalyzer<'a> {
             self.analyze_scope(_fn.scope_key);
         }
 
+        let unknown_vars = self.s.collect();
+
+        for (ty_var_key, _) in unknown_vars {
+            let (ty_state, file_key, span) = self.s.all_ty_vars[ty_var_key];
+
+            let mut code_window = CodeWindow::new(&self.files_infos[file_key], span.start);
+            code_window.mark_error(span, vec!["لا يمكن تحديد النوع هنا ضمنياً".into()]);
+            let diagnostic =
+                Diagnostic::error("يجب تحديد النوع بشكل خارجي".into(), vec![code_window]);
+            self.diagnostics.push(diagnostic);
+        }
+
         println!("Exprs types:");
         println!("Len: {}", self.typed_ast.exprs.values().len());
         for (key, ty) in &self.typed_ast.exprs {
+            let ty = self.s.apply(ty);
             println!(
-                "{:?}, Ty: {}, Kind: {:?}",
+                "{:?}, Ty: {}, Kind: {:?}, Type: {:?}",
                 *key,
                 self.fmt_ty(&ty),
                 self.ast.exprs[*key].kind,
+                ty.inner()
             )
         }
+
+        println!("{:#?}\n!!!!!!!!!!!!!!!!!!!!\n", self.s);
 
         if !self.diagnostics.is_empty() {
             eprint_diagnostics(self.diagnostics);
@@ -137,46 +153,25 @@ impl<'a> SemanticsAnalyzer<'a> {
         for stm in &stms {
             match stm {
                 Stm::Let(let_stm_key) => {
-                    let let_stm_type = if let Some(expr_key) = self.ast.lets[*let_stm_key].assign {
-                        let mut expr_ty = self.infer(expr_key);
+                    let let_stm_type =
+                        if let Some(type_expr_key) = self.ast.lets[*let_stm_key].binding.typ {
+                            self.analyze_type_expr(type_expr_key).0
+                        } else {
+                            self.s.new_unknown_ty_var(
+                                self.current_file_key,
+                                self.ast.lets[*let_stm_key].binding.kind.get_span(),
+                            )
+                        };
 
-                        let mut let_stm_type =
-                            if let Some(type_expr_key) = self.ast.lets[*let_stm_key].binding.typ {
-                                self.analyze_type_expr(type_expr_key).0
-                            } else {
-                                self.s.new_unknown_ty_var(
-                                    self.current_file_key,
-                                    self.ast.lets[*let_stm_key].binding.kind.get_span(),
-                                )
-                            };
-
-                        println!("Let type: {:#?}", let_stm_type.inner());
+                    if let Some(expr_key) = self.ast.lets[*let_stm_key].assign {
+                        let expr_ty = self.infer(expr_key);
 
                         let expr_span = self.get_expr_span(expr_key);
-
-                        println!("Expr type: {:#?}", expr_ty.inner());
 
                         if let Err(err) = self.s.unify(&let_stm_type, &expr_ty) {
                             self.add_type_mismatch_err(&let_stm_type, &expr_ty, expr_span);
                         }
-
-                        expr_ty = self.s.apply(&expr_ty);
-                        let_stm_type = self.s.apply(&let_stm_type);
-
-                        println!("Expr inferred type: {:#?}", expr_ty.inner());
-
-                        let_stm_type
-                    } else if let Some(type_expr_key) = self.ast.lets[*let_stm_key].binding.typ {
-                        self.analyze_type_expr(type_expr_key).0
-                    } else {
-                        self.s.new_unknown_ty_var(
-                            self.current_file_key,
-                            self.ast.lets[*let_stm_key].binding.kind.get_span(),
-                        )
-                    };
-
-                    println!("Let inferred type: {:#?}", let_stm_type.inner());
-                    println!("===============");
+                    }
 
                     self.typed_ast.lets.insert(
                         *let_stm_key,
@@ -200,15 +195,6 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
 
         self.ast.scopes[scope_key].stms = stms;
-
-        // self.typed_ast.substitutions = self
-        //     .typed_ast
-        //     .substitutions
-        //     .keys()
-        //     .map(|ty_var_key| self.s.apply(&Ty::type_var(ty_var_key)))
-        //     .collect();
-
-        // println!("{:#?}\n!!!!!!!!!!!!!!!!!!!!\n", self.s)
     }
 
     fn set_bindnig_ty(&mut self, let_stm_key: LetStmKey, kind: BindingKind, ty: &Ty) {

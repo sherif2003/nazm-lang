@@ -159,28 +159,26 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.add_calling_non_callable_err(&on_expr_ty, self.get_expr_span(on), parens_span);
                 return self
                     .s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
             }
             Type::TypeVar(_) => {
                 let params_types = args
                     .iter()
                     .map(|expr_key| {
-                        self.s.new_unknown_ty_var(
-                            self.current_file_key,
-                            self.get_expr_span(*expr_key),
-                        )
+                        self.s
+                            .new_never_ty_var(self.current_file_key, self.get_expr_span(*expr_key))
                     })
                     .collect::<ThinVec<_>>();
                 let return_type = self
                     .s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
                 (params_types, return_type, true)
             }
             _ => {
                 self.add_calling_non_callable_err(&on_expr_ty, self.get_expr_span(on), parens_span);
                 return self
                     .s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
             }
         };
 
@@ -243,21 +241,21 @@ impl<'a> SemanticsAnalyzer<'a> {
             }) => (underlying_typ, true),
             Type::Slice(underlying_ty) => (underlying_ty, false),
             Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
-                self.add_indexing_non_indexable_err(&on_expr_ty, brackets_span);
+                self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
                 return self
                     .s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
             }
             Type::TypeVar(_) => (
                 self.s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(on)),
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(on)),
                 true,
             ),
             _ => {
-                self.add_indexing_non_indexable_err(&on_expr_ty, brackets_span);
+                self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
                 return self
                     .s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
             }
         };
 
@@ -312,24 +310,24 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     self.add_out_of_bounds_tuple_idx_err(idx, types.len(), *idx_span);
                     self.s
-                        .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                        .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
                 }
             }
             Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
                 self.add_indexing_non_tuple_err(&on_expr_ty, on, *idx_span);
                 self.s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
             }
             Type::TypeVar(_) => {
                 let unknown_ty = self
                     .s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
                 unknown_ty
             }
             _ => {
                 self.add_indexing_non_tuple_err(&on_expr_ty, on, *idx_span);
                 self.s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
             }
         }
     }
@@ -498,6 +496,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let on = *on;
         let on_expr_ty = self.infer(on);
 
+        // TODO: Support methods and the length method on slices
         match on_expr_ty.inner() {
             Type::Concrete(ConcreteType::FieldsStruct(struct_key)) => {
                 let struct_fields = &self.typed_ast.fields_structs[&struct_key].fields;
@@ -513,24 +512,24 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     self.add_unknown_field_in_struct_expr_err(struct_key, name.id, name.span);
                     self.s
-                        .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                        .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
                 }
             }
             Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
                 self.add_type_doesnt_have_fields_err(&on_expr_ty, on, *name);
                 self.s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
             }
             Type::TypeVar(_) => {
                 let unknown_ty = self
                     .s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
                 unknown_ty
             }
             _ => {
                 self.add_type_doesnt_have_fields_err(&on_expr_ty, on, *name);
                 self.s
-                    .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
             }
         }
     }

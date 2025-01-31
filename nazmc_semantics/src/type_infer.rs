@@ -6,15 +6,26 @@ use nazmc_diagnostics::span::Span;
 
 use crate::typed_ast::{ArrayType, ConcreteType, FnPtrType, LambdaType, Ty, Type, TypeVarKey};
 
-#[derive(Debug, Default)]
-pub struct Substitution {
-    pub all_ty_vars: TiVec<TypeVarKey, (Ty, FileKey, Span)>,
-    substitutions: HashMap<TypeVarKey, Ty>,
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) enum TyVarState {
+    #[default]
+    Unknown,
+    Never,
+    UnspecifiedUnsignedInt,
+    UnspecifiedSignedInt,
+    UnspecifiedFloat,
 }
 
-pub enum TypeUnificationErr {
+#[derive(Debug, Default)]
+pub(crate) struct Substitution {
+    pub(crate) all_ty_vars: TiVec<TypeVarKey, (TyVarState, FileKey, Span)>,
+    pub(crate) substitutions: HashMap<TypeVarKey, Ty>,
+}
+
+pub(crate) enum TypeUnificationErr {
     CycleDetected { var_key: TypeVarKey, ty: Ty },
     CannotUnify { t1: Ty, t2: Ty },
+    CannotUnifyTyVar { ty_var_key: TypeVarKey, ty: Ty },
 }
 
 impl Substitution {
@@ -23,16 +34,16 @@ impl Substitution {
     }
 
     pub(crate) fn new_unknown_ty_var(&mut self, file_key: FileKey, span: Span) -> Ty {
-        let ty_var_key =
-            self.all_ty_vars
-                .push_and_get_key((Ty::new(Type::Unknown), file_key, span));
+        let ty_var_key = self
+            .all_ty_vars
+            .push_and_get_key((TyVarState::Unknown, file_key, span));
         Ty::type_var(ty_var_key)
     }
 
     pub(crate) fn new_never_ty_var(&mut self, file_key: FileKey, span: Span) -> Ty {
         let ty_var_key = self
             .all_ty_vars
-            .push_and_get_key((Ty::new(Type::Never), file_key, span));
+            .push_and_get_key((TyVarState::Never, file_key, span));
         Ty::type_var(ty_var_key)
     }
 
@@ -41,18 +52,16 @@ impl Substitution {
         file_key: FileKey,
         span: Span,
     ) -> Ty {
-        let ty_var_key = self.all_ty_vars.push_and_get_key((
-            Ty::new(Type::UnspecifiedUnsignedInt),
-            file_key,
-            span,
-        ));
+        let ty_var_key =
+            self.all_ty_vars
+                .push_and_get_key((TyVarState::UnspecifiedUnsignedInt, file_key, span));
         Ty::type_var(ty_var_key)
     }
 
     pub(crate) fn new_unspecified_float_ty_var(&mut self, file_key: FileKey, span: Span) -> Ty {
         let ty_var_key =
             self.all_ty_vars
-                .push_and_get_key((Ty::new(Type::UnspecifiedFloat), file_key, span));
+                .push_and_get_key((TyVarState::UnspecifiedFloat, file_key, span));
         Ty::type_var(ty_var_key)
     }
 
@@ -60,13 +69,8 @@ impl Substitution {
     /// with their substituted types, if present in the substitution map.
     pub(crate) fn apply(&self, ty: &Ty) -> Ty {
         match &*ty.borrow() {
-            // No substitution for unknown types
-            Type::Unknown
-            | Type::Never
-            | Type::UnspecifiedUnsignedInt
-            | Type::UnspecifiedSignedInt
-            | Type::UnspecifiedFloat
-            | Type::Concrete(_) => ty.clone(),
+            // No substitution for concrete types
+            Type::Concrete(_) => ty.clone(),
 
             // Replace a type variable if it has a substitution
             Type::TypeVar(type_var_key) => {
@@ -206,78 +210,138 @@ impl Substitution {
             });
         }
 
-        match self.all_ty_vars[ty_var_key].0.inner() {
-            Type::Unknown | Type::Never => {
-                self.substitutions.insert(ty_var_key, ty.clone());
-            }
+        if let (_, Type::TypeVar(_))
+        | (TyVarState::Unknown | TyVarState::Never, _)
+        | (
+            TyVarState::UnspecifiedUnsignedInt,
+            Type::Concrete(
+                ConcreteType::I
+                | ConcreteType::I1
+                | ConcreteType::I2
+                | ConcreteType::I4
+                | ConcreteType::I8
+                | ConcreteType::U
+                | ConcreteType::U1
+                | ConcreteType::U2
+                | ConcreteType::U4
+                | ConcreteType::U8,
+            ),
+        )
+        | (
+            TyVarState::UnspecifiedSignedInt,
+            Type::Concrete(
+                ConcreteType::I
+                | ConcreteType::I1
+                | ConcreteType::I2
+                | ConcreteType::I4
+                | ConcreteType::I8,
+            ),
+        )
+        | (TyVarState::UnspecifiedFloat, Type::Concrete(ConcreteType::F4 | ConcreteType::F8)) =
+            (self.all_ty_vars[ty_var_key].0, &*ty.borrow())
+        {
+            self.substitutions.insert(ty_var_key, ty.clone());
 
-            Type::UnspecifiedUnsignedInt => {
-                let (Type::Concrete(
-                    ConcreteType::I
-                    | ConcreteType::I1
-                    | ConcreteType::I2
-                    | ConcreteType::I4
-                    | ConcreteType::I8
-                    | ConcreteType::U
-                    | ConcreteType::U1
-                    | ConcreteType::U2
-                    | ConcreteType::U4
-                    | ConcreteType::U8,
-                )
-                | Type::UnspecifiedUnsignedInt
-                | Type::UnspecifiedSignedInt
-                | Type::TypeVar(_)) = &*ty.borrow()
-                else {
-                    return Err(TypeUnificationErr::CannotUnify {
-                        t1: self.all_ty_vars[ty_var_key].0.clone(),
-                        t2: ty.clone(),
-                    });
-                };
-                self.substitutions.insert(ty_var_key, ty.clone());
-            }
-
-            Type::UnspecifiedSignedInt => {
-                let (Type::Concrete(
-                    ConcreteType::I
-                    | ConcreteType::I1
-                    | ConcreteType::I2
-                    | ConcreteType::I4
-                    | ConcreteType::I8,
-                )
-                | Type::UnspecifiedSignedInt
-                | Type::TypeVar(_)) = &*ty.borrow()
-                else {
-                    return Err(TypeUnificationErr::CannotUnify {
-                        t1: self.all_ty_vars[ty_var_key].0.clone(),
-                        t2: ty.clone(),
-                    });
-                };
-                self.substitutions.insert(ty_var_key, ty.clone());
-            }
-
-            Type::UnspecifiedFloat => {
-                let (Type::Concrete(ConcreteType::F4 | ConcreteType::F8)
-                | Type::UnspecifiedFloat
-                | Type::TypeVar(_)) = &*ty.borrow()
-                else {
-                    return Err(TypeUnificationErr::CannotUnify {
-                        t1: self.all_ty_vars[ty_var_key].0.clone(),
-                        t2: ty.clone(),
-                    });
-                };
-                self.substitutions.insert(ty_var_key, ty.clone());
-            }
-
-            _ => unreachable!(),
+            Ok(())
+        } else {
+            Err(TypeUnificationErr::CannotUnifyTyVar {
+                ty_var_key: ty_var_key,
+                ty: ty.clone(),
+            })
         }
-
-        Ok(())
     }
 
     pub(crate) fn check_map_to_unspecified_number(&self, ty: &Ty) -> bool {
         matches!(&*self.apply(&ty).borrow(), Type::TypeVar(type_var_key) if matches!(
-            &*self.all_ty_vars[*type_var_key].0.borrow(),
-            Type::UnspecifiedUnsignedInt | Type::UnspecifiedSignedInt | Type::UnspecifiedFloat
+            self.all_ty_vars[*type_var_key].0,
+            TyVarState::UnspecifiedUnsignedInt | TyVarState::UnspecifiedSignedInt | TyVarState::UnspecifiedFloat
         ))
+    }
+
+    pub(crate) fn collect(&mut self) -> HashMap<TypeVarKey, ()> {
+        let ty_vars_len = self.all_ty_vars.len();
+        let mut unknown_vars = HashMap::new();
+
+        for i in 0..ty_vars_len {
+            let ty_var_key: TypeVarKey = i.into();
+
+            let final_ty = self.final_apply(&mut unknown_vars, &Ty::type_var(ty_var_key));
+
+            self.substitutions.insert(ty_var_key, final_ty);
+        }
+
+        unknown_vars
+    }
+
+    fn final_apply(&mut self, unknown_vars: &mut HashMap<TypeVarKey, ()>, ty: &Ty) -> Ty {
+        match &*ty.borrow() {
+            Type::Concrete(concrete_type) => ty.clone(),
+            Type::TypeVar(type_var_key) => {
+                if let Some(substituted_ty) = self.substitutions.get(type_var_key) {
+                    self.final_apply(unknown_vars, &substituted_ty.clone()) // Apply recursively in case of nested substitutions
+                } else {
+                    match self.all_ty_vars[*type_var_key].0 {
+                        TyVarState::Unknown => {
+                            self.substitutions.insert(*type_var_key, Ty::never());
+                            unknown_vars.insert(*type_var_key, ());
+                            Ty::never()
+                        }
+                        TyVarState::Never => {
+                            self.substitutions.insert(*type_var_key, Ty::never());
+                            Ty::never()
+                        }
+                        TyVarState::UnspecifiedUnsignedInt | TyVarState::UnspecifiedSignedInt => {
+                            self.substitutions.insert(*type_var_key, Ty::i4());
+                            Ty::i4()
+                        }
+                        TyVarState::UnspecifiedFloat => {
+                            self.substitutions.insert(*type_var_key, Ty::f4());
+                            Ty::f4()
+                        }
+                    }
+                }
+            }
+
+            // Recursively apply substitutions to concrete types
+            Type::Slice(inner) => Ty::slice(self.final_apply(unknown_vars, inner)),
+            Type::Ptr(inner) => Ty::ptr(self.final_apply(unknown_vars, inner)),
+            Type::Ref(inner) => Ty::reference(self.final_apply(unknown_vars, inner)),
+            Type::PtrMut(inner) => Ty::ptr_mut(self.final_apply(unknown_vars, inner)),
+            Type::RefMut(inner) => Ty::ref_mut(self.final_apply(unknown_vars, inner)),
+
+            Type::Array(array_type) => Ty::array(
+                self.final_apply(unknown_vars, &array_type.underlying_typ),
+                array_type.size,
+            ),
+
+            Type::Tuple(tuple_type) => Ty::tuple(
+                tuple_type
+                    .types
+                    .iter()
+                    .map(|inner| self.final_apply(unknown_vars, inner)),
+            ),
+
+            Type::Lambda(lambda_type) => {
+                let retutn_type = self.final_apply(unknown_vars, &lambda_type.return_type);
+                Ty::lambda(
+                    lambda_type
+                        .params_types
+                        .iter()
+                        .map(|param| self.final_apply(unknown_vars, param)),
+                    retutn_type,
+                )
+            }
+
+            Type::FnPtr(fn_ptr_type) => {
+                let retutn_type = self.final_apply(unknown_vars, &fn_ptr_type.return_type);
+                Ty::fn_ptr(
+                    fn_ptr_type
+                        .params_types
+                        .iter()
+                        .map(|param| self.final_apply(unknown_vars, param)),
+                    retutn_type,
+                )
+            }
+        }
     }
 }

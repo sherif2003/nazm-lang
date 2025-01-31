@@ -1,6 +1,6 @@
-use std::{fmt::format, vec};
+use std::vec;
 
-use crate::*;
+use crate::{type_infer::TyVarState, *};
 
 impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn fmt_pkg_name(&self, pkg_key: PkgKey) -> String {
@@ -23,16 +23,11 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn fmt_ty(&self, ty: &Ty) -> String {
         match ty.inner() {
-            Type::Unknown => format!("_"),
-            Type::Never => format!("!!"),
-            Type::UnspecifiedUnsignedInt => format!("{{عدد}}"),
-            Type::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
-            Type::UnspecifiedFloat => format!("{{عدد عشري}}"),
             Type::TypeVar(ty_var_key) => {
                 let new_ty = &self.s.apply(ty);
                 if new_ty == ty {
                     // format!("_{}", usize::from(ty_var_key))
-                    self.fmt_ty(&self.s.all_ty_vars[ty_var_key].0)
+                    self.fmt_ty_var_state_ty(self.s.all_ty_vars[ty_var_key].0)
                 } else {
                     self.fmt_ty(new_ty)
                 }
@@ -82,8 +77,19 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
+    pub(crate) fn fmt_ty_var_state_ty(&self, ty_var_state: TyVarState) -> String {
+        match ty_var_state {
+            TyVarState::Unknown => format!("_"),
+            TyVarState::Never => format!("!!"),
+            TyVarState::UnspecifiedUnsignedInt => format!("{{عدد}}"),
+            TyVarState::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
+            TyVarState::UnspecifiedFloat => format!("{{عدد عشري}}"),
+        }
+    }
+
     pub(crate) fn fmt_con_ty(&self, con_ty: &ConcreteType) -> String {
         match con_ty {
+            ConcreteType::Never => format!("!!"),
             ConcreteType::Unit => format!("()"),
             ConcreteType::I => format!("ص"),
             ConcreteType::I1 => format!("ص1"),
@@ -291,15 +297,18 @@ impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn add_indexing_non_indexable_err(
         &mut self,
         non_indexable_ty: &Ty,
+        on_expr_key: ExprKey,
         brackets_span: Span,
     ) {
-        let msg = format!(
-            "لا يمكن فهرسة قيمة من النوع `{}`",
-            self.fmt_ty(non_indexable_ty)
-        );
+        let non_indexable_ty = self.fmt_ty(non_indexable_ty);
+        let msg = format!("لا يمكن فهرسة قيمة من النوع `{}`", non_indexable_ty);
         let mut code_window = CodeWindow::new(
             &self.files_infos[self.current_file_key],
             brackets_span.start,
+        );
+        code_window.mark_secondary(
+            self.get_expr_span(on_expr_key),
+            vec![format!("التعبير من النوع `{}`", non_indexable_ty)],
         );
         code_window.mark_error(brackets_span, vec![]);
         let diagnostic = Diagnostic::error(msg, vec![code_window]);
