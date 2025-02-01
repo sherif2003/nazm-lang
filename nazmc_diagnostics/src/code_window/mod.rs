@@ -677,10 +677,7 @@ mod tests {
 
     use owo_colors::{Style, XtermColors};
 
-    use crate::{
-        span::{Span, SpanCursor},
-        DiagnosticPrint,
-    };
+    use crate::span::{Span, SpanCursor};
 
     use super::CodeWindow;
 
@@ -692,33 +689,35 @@ mod tests {
             .unwrap();
     }
 
-    fn get_code_reporter() -> CodeWindow {
-        Self {
-            file_path: "اختبار.نظم",
-            file_lines: &[
-                "حجز متغير أ = 555؛".to_string(),
-                "حجز متغير ب = 555؛".to_string(),
-                "حجز متغير ج = 555؛".to_string(),
-                "حجز متغير د = 555؛".to_string(),
-                "حجز متغير ه = 555؛".to_string(),
-                "حجز متغير و = 555؛".to_string(),
-                "حجز متغير ز = 555؛".to_string(),
-                "حجز متغير ح = 555؛".to_string(),
-                "حجز متغير ك = 555؛".to_string(),
-                "حجز متغير ل = 555؛".to_string(),
-                "حجز متغير م = 555؛".to_string(),
-                "حجز متغير ن = 555؛".to_string(),
-                "حجز متغير ز = 555؛".to_string(),
-            ],
-            cursor: SpanCursor { line: 0, col: 0 },
-            code_lines: HashMap::new(),
-        }
+    macro_rules! get_code_reporter {
+        () => {
+            CodeWindow {
+                file_path: "اختبار.نظم",
+                file_lines: &[
+                    "حجز متغير أ = 555؛".to_string(),
+                    "حجز متغير ب = 555؛".to_string(),
+                    "حجز متغير ج = 555؛".to_string(),
+                    "حجز متغير د = 555؛".to_string(),
+                    "حجز متغير ه = 555؛".to_string(),
+                    "حجز متغير و = 555؛".to_string(),
+                    "حجز متغير ز = 555؛".to_string(),
+                    "حجز متغير ح = 555؛".to_string(),
+                    "حجز متغير ك = 555؛".to_string(),
+                    "حجز متغير ل = 555؛".to_string(),
+                    "حجز متغير م = 555؛".to_string(),
+                    "حجز متغير ن = 555؛".to_string(),
+                    "حجز متغير ز = 555؛".to_string(),
+                ],
+                cursor: SpanCursor { line: 0, col: 0 },
+                code_lines: HashMap::new(),
+            }
+        };
     }
 
     #[test]
     fn test_one_line() {
         rtl();
-        let mut reporter = get_code_reporter();
+        let mut reporter = get_code_reporter!();
 
         reporter.mark(
             Span::new((0, 0), (0, 4)),
@@ -727,13 +726,13 @@ mod tests {
             vec!["القيمة ليست متغيرة".to_string()],
         );
 
-        println!("{:?}", reporter)
+        println!("{}", reporter)
     }
 
     #[test]
     fn test_multi_line() {
         rtl();
-        let mut reporter = get_code_reporter();
+        let mut reporter = get_code_reporter!();
 
         reporter.mark(
             Span::new((0, 4), (1, 5)),
@@ -742,13 +741,28 @@ mod tests {
             vec!["القيمة ليست متغيرة".to_string()],
         );
 
-        println!("{:?}", reporter)
+        println!("{}", reporter)
+    }
+
+    #[test]
+    fn test_multi_line_ends_at_first_column() {
+        rtl();
+        let mut reporter = get_code_reporter!();
+
+        reporter.mark(
+            Span::new((0, 4), (1, 0)),
+            '^',
+            Style::new().red().bold(),
+            vec!["القيمة ليست متغيرة".to_string()],
+        );
+
+        println!("{}", reporter)
     }
 
     #[test]
     fn test_reporting_complex() {
         rtl();
-        let mut reporter = get_code_reporter();
+        let mut reporter = get_code_reporter!();
 
         reporter
             .mark(
@@ -881,6 +895,6 @@ mod tests {
                 vec!["علامة طويلة".to_string()],
             );
 
-        println!("{:?}", reporter);
+        println!("{}", reporter);
     }
 }
