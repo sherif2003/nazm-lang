@@ -5,6 +5,7 @@ mod type_infer;
 mod typed_ast;
 mod types;
 
+use iter_tools::Itertools;
 use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
 
 pub(crate) use nazmc_ast::*;
@@ -147,7 +148,8 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         println!("Exprs types:");
         println!("Len: {}", self.typed_ast.exprs.values().len());
-        for (key, ty) in &self.typed_ast.exprs {
+        for key in self.typed_ast.exprs.keys().sorted() {
+            let ty = &self.typed_ast.exprs[key];
             let ty = self.s.apply(ty);
             println!(
                 "{:?}, Ty: {}, Kind: {:?}, Type: {:?}",

@@ -1,4 +1,7 @@
+use nazmc_diagnostics::span::SpanCursor;
+
 use crate::{
+    type_infer::TyVarState,
     typed_ast::{ArrayType, FieldInfo, LambdaParams},
     *,
 };
@@ -53,7 +56,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
             ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
             ExprKind::UnaryOp(unary_op_expr) => todo!(),
-            ExprKind::BinaryOp(binary_op_expr) => todo!(),
+            ExprKind::BinaryOp(binary_op_expr) => self.infer_bin_op_expr(&binary_op_expr.clone()), // TODO: Remove the clone
             ExprKind::On => todo!(),
             ExprKind::Break | ExprKind::Continue => self
                 .s
@@ -177,7 +180,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 params_types,
                 return_type,
             }) => (params_types, return_type, false),
-            Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
+            Type::TypeVar(ty_var_key) if self.s.check_map_to_unspecified_number(ty_var_key) => {
                 self.add_calling_non_callable_err(&on_expr_ty, self.get_expr_span(on), parens_span);
                 return self
                     .s
@@ -263,7 +266,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 size: _,
             }) => (underlying_typ, true),
             Type::Slice(underlying_ty) => (underlying_ty, false),
-            Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
+            Type::TypeVar(ty_var_key) if self.s.check_map_to_unspecified_number(ty_var_key) => {
                 self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
                 return self
                     .s
@@ -338,7 +341,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                         .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
                 }
             }
-            Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
+            Type::TypeVar(ty_var_key) if self.s.check_map_to_unspecified_number(ty_var_key) => {
                 self.add_indexing_non_tuple_err(&on_expr_ty, on, *idx_span);
                 self.s
                     .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
@@ -543,7 +546,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                         .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
                 }
             }
-            Type::TypeVar(_) if self.s.check_map_to_unspecified_number(&on_expr_ty) => {
+            Type::TypeVar(ty_var_key) if self.s.check_map_to_unspecified_number(ty_var_key) => {
                 self.add_type_doesnt_have_fields_err(&on_expr_ty, on, *name);
                 self.s
                     .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
@@ -738,5 +741,152 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
 
         Ty::tuple(tuple_types)
+    }
+
+    fn infer_bin_op_expr(
+        &mut self,
+        BinaryOpExpr {
+            op,
+            op_span_cursor,
+            left,
+            right,
+        }: &BinaryOpExpr,
+    ) -> Ty {
+        let left_ty = self.infer(*left);
+
+        match op {
+            BinOp::LOr | BinOp::LAnd => {
+                self.unify_with_check(&Ty::boolean(), &left_ty, *left, op, op_span_cursor);
+                let right_ty = self.infer(*right);
+                self.unify_with_check(&Ty::boolean(), &right_ty, *right, op, op_span_cursor);
+                Ty::boolean()
+            }
+            BinOp::GE | BinOp::GT | BinOp::LE | BinOp::LT => {
+                if self.unify_with_num(&left_ty, *left, op, op_span_cursor) {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
+                } else {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_num(&right_ty, *right, op, op_span_cursor);
+                }
+                Ty::boolean()
+            }
+            BinOp::EqualEqual | BinOp::NotEqual => {
+                let right_ty = self.infer(*right);
+                self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
+                Ty::boolean()
+            }
+            BinOp::Assign => {
+                let right_ty = self.infer(*right);
+                self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
+                Ty::unit()
+            }
+            BinOp::OpenOpenRange
+            | BinOp::CloseOpenRange
+            | BinOp::OpenCloseRange
+            | BinOp::CloseCloseRange => todo!(), // TODO
+            BinOp::BOr
+            | BinOp::Xor
+            | BinOp::BAnd
+            | BinOp::Shr
+            | BinOp::Shl
+            | BinOp::Plus
+            | BinOp::Minus
+            | BinOp::Times
+            | BinOp::Div
+            | BinOp::Mod => {
+                if self.unify_with_num(&left_ty, *left, op, op_span_cursor) {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
+                } else {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_num(&right_ty, *right, op, op_span_cursor);
+                }
+                left_ty
+            }
+            BinOp::PlusAssign
+            | BinOp::MinusAssign
+            | BinOp::TimesAssign
+            | BinOp::DivAssign
+            | BinOp::ModAssign
+            | BinOp::BAndAssign
+            | BinOp::BOrAssign
+            | BinOp::XorAssign
+            | BinOp::ShlAssign
+            | BinOp::ShrAssign => {
+                if self.unify_with_num(&left_ty, *left, op, op_span_cursor) {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
+                } else {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_num(&right_ty, *right, op, op_span_cursor);
+                }
+                Ty::unit()
+            }
+        }
+    }
+
+    fn unify_with_num(
+        &mut self,
+        found_ty: &Ty,
+        expr_key: ExprKey,
+        op: &BinOp,
+        op_span_cursor: &SpanCursor,
+    ) -> bool {
+        let found_ty = self.s.apply(found_ty);
+
+        match found_ty.inner() {
+            Type::Concrete(
+                ConcreteType::I
+                | ConcreteType::I1
+                | ConcreteType::I2
+                | ConcreteType::I4
+                | ConcreteType::I8
+                | ConcreteType::U
+                | ConcreteType::U1
+                | ConcreteType::U2
+                | ConcreteType::U4
+                | ConcreteType::U8
+                | ConcreteType::F4
+                | ConcreteType::F8,
+            ) => true,
+            Type::TypeVar(ty_var_key) if self.s.check_map_to_unspecified_number(ty_var_key) => true,
+            Type::TypeVar(ty_var_key) => {
+                self.s.all_ty_vars[ty_var_key].0 = TyVarState::UnspecifiedNumber;
+                true
+            }
+            _ => {
+                self.add_type_mismatch_in_bin_op_err(
+                    &Ty::i4(),
+                    &found_ty,
+                    expr_key,
+                    op,
+                    op_span_cursor,
+                );
+                false
+            }
+        }
+    }
+
+    fn unify_with_check(
+        &mut self,
+        expected_ty: &Ty,
+        found_ty: &Ty,
+        expr_key: ExprKey,
+        op: &BinOp,
+        op_span_cursor: &SpanCursor,
+    ) -> bool {
+        if let Err(err) = self.s.unify(expected_ty, found_ty) {
+            self.add_type_mismatch_in_bin_op_err(
+                &Ty::i4(),
+                &found_ty,
+                expr_key,
+                op,
+                op_span_cursor,
+            );
+            false
+        } else {
+            true
+        }
     }
 }

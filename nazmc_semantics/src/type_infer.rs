@@ -11,6 +11,7 @@ pub(crate) enum TyVarState {
     #[default]
     Unknown,
     Never,
+    UnspecifiedNumber,
     UnspecifiedUnsignedInt,
     UnspecifiedSignedInt,
     UnspecifiedFloat,
@@ -213,6 +214,23 @@ impl Substitution {
         if let (_, Type::TypeVar(_))
         | (TyVarState::Unknown | TyVarState::Never, _)
         | (
+            TyVarState::UnspecifiedNumber,
+            Type::Concrete(
+                ConcreteType::I
+                | ConcreteType::I1
+                | ConcreteType::I2
+                | ConcreteType::I4
+                | ConcreteType::I8
+                | ConcreteType::U
+                | ConcreteType::U1
+                | ConcreteType::U2
+                | ConcreteType::U4
+                | ConcreteType::U8
+                | ConcreteType::F4
+                | ConcreteType::F8,
+            ),
+        )
+        | (
             TyVarState::UnspecifiedUnsignedInt,
             Type::Concrete(
                 ConcreteType::I
@@ -251,11 +269,14 @@ impl Substitution {
         }
     }
 
-    pub(crate) fn check_map_to_unspecified_number(&self, ty: &Ty) -> bool {
-        matches!(&*self.apply(&ty).borrow(), Type::TypeVar(type_var_key) if matches!(
-            self.all_ty_vars[*type_var_key].0,
-            TyVarState::UnspecifiedUnsignedInt | TyVarState::UnspecifiedSignedInt | TyVarState::UnspecifiedFloat
-        ))
+    pub(crate) fn check_map_to_unspecified_number(&self, ty_var_key: TypeVarKey) -> bool {
+        matches!(
+            self.all_ty_vars[ty_var_key].0,
+            TyVarState::UnspecifiedNumber
+                | TyVarState::UnspecifiedUnsignedInt
+                | TyVarState::UnspecifiedSignedInt
+                | TyVarState::UnspecifiedFloat
+        )
     }
 
     pub(crate) fn collect(&mut self) -> HashMap<TypeVarKey, ()> {
@@ -281,7 +302,7 @@ impl Substitution {
                     self.final_apply(unknown_vars, &substituted_ty.clone()) // Apply recursively in case of nested substitutions
                 } else {
                     match self.all_ty_vars[*type_var_key].0 {
-                        TyVarState::Unknown => {
+                        TyVarState::Unknown | TyVarState::UnspecifiedNumber => {
                             self.substitutions.insert(*type_var_key, Ty::never());
                             unknown_vars.insert(*type_var_key, ());
                             Ty::never()

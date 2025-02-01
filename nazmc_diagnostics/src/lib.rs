@@ -73,6 +73,14 @@ impl<'a> Diagnostic<'a> {
         self.code_windows.push(code_window);
         self
     }
+
+    pub fn code_windows(&mut self) -> &mut [CodeWindow<'a>] {
+        &mut self.code_windows
+    }
+
+    pub fn last_code_window(&mut self) -> &mut CodeWindow<'a> {
+        self.code_windows.last_mut().unwrap()
+    }
 }
 
 enum DiagnosticLevel {
