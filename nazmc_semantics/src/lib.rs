@@ -51,7 +51,8 @@ pub struct SemanticsAnalyzer<'a> {
     s: Substitution,
     /// For fns and lambdas only
     current_scope_expected_return_ty: Ty,
-    is_current_fn_scope: bool,
+    current_lambda_first_implicit_return_ty_span: Option<Span>,
+    current_lambda_scope_key: Option<ScopeKey>,
 }
 
 impl<'a> SemanticsAnalyzer<'a> {
@@ -75,6 +76,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 fns_signatures: HashMap::with_capacity(ast.fns.len()),
                 lets: HashMap::with_capacity(ast.lets.len()),
                 exprs: HashMap::with_capacity(ast.exprs.len()),
+                lambdas_params: HashMap::new(),
             },
             ast,
             ..Default::default()
@@ -95,7 +97,8 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
 
         // Will be restored to true by inner lambda scopes
-        self.is_current_fn_scope = true;
+        self.current_lambda_scope_key = None;
+        self.current_lambda_first_implicit_return_ty_span = None;
 
         // TODO: Remove the clone
         // Don't take the ownership as the errors module requires the access to them
@@ -116,17 +119,15 @@ impl<'a> SemanticsAnalyzer<'a> {
                 .s
                 .unify(&self.current_scope_expected_return_ty, &found_return_ty)
             {
-                let type_expr_span = self.get_type_expr_span(_fn.return_type);
-
-                let span = self.ast.scopes[_fn.scope_key]
-                    .return_expr
-                    .map_or(type_expr_span, |expr_key| self.get_expr_span(expr_key));
+                let span = self.ast.scopes[_fn.scope_key].return_expr.map_or_else(
+                    || self.get_type_expr_span(_fn.return_type.unwrap()),
+                    |expr_key| self.get_expr_span(expr_key),
+                );
 
                 self.add_type_mismatch_in_fn_return_ty_err(
                     fn_key,
                     &self.current_scope_expected_return_ty.clone(),
                     &found_return_ty,
-                    type_expr_span,
                     span,
                 );
             }
@@ -175,7 +176,10 @@ impl<'a> SemanticsAnalyzer<'a> {
             .map(|(_, type_expr_key)| self.analyze_type_expr(*type_expr_key).0)
             .collect::<ThinVec<_>>();
 
-        let return_type = self.analyze_type_expr(self.ast.fns[fn_key].return_type).0;
+        let return_type = self.ast.fns[fn_key].return_type.map_or_else(
+            || Ty::unit(),
+            |type_expr_key| self.analyze_type_expr(type_expr_key).0,
+        );
 
         self.typed_ast
             .fns_signatures
@@ -222,7 +226,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
                     self.set_bindnig_ty(
                         *let_stm_key,
-                        self.ast.lets[*let_stm_key].binding.kind.clone(),
+                        &self.ast.lets[*let_stm_key].binding.kind.clone(),
                         &let_stm_type,
                     );
                 }
@@ -266,7 +270,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.ast.scopes[scope_key].stms = stms;
     }
 
-    fn set_bindnig_ty(&mut self, let_stm_key: LetStmKey, kind: BindingKind, ty: &Ty) {
+    fn set_bindnig_ty(&mut self, let_stm_key: LetStmKey, kind: &BindingKind, ty: &Ty) {
         match kind {
             BindingKind::Id(id) => {
                 self.typed_ast
@@ -290,17 +294,17 @@ impl<'a> SemanticsAnalyzer<'a> {
                         for i in 0..kinds.len() {
                             let kind = &kinds[i];
                             let ty = &types[i];
-                            self.set_bindnig_ty(let_stm_key, kind.clone(), ty);
+                            self.set_bindnig_ty(let_stm_key, kind, ty);
                         }
                     } else {
                         let found_ty =
                             self.destructed_tuple_to_ty_with_unknown(let_stm_key, &kinds);
-                        self.add_type_mismatch_err(ty, &found_ty, span);
+                        self.add_type_mismatch_err(ty, &found_ty, *span);
                     }
                 } else {
                     let found_ty = self.destructed_tuple_to_ty_with_unknown(let_stm_key, &kinds);
                     if let Err(err) = self.s.unify(ty, &found_ty) {
-                        self.add_type_mismatch_err(&ty, &found_ty, span);
+                        self.add_type_mismatch_err(&ty, &found_ty, *span);
                     }
                 }
             }
@@ -318,7 +322,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             let ty = self
                 .s
                 .new_unknown_ty_var(self.current_file_key, kind.get_span());
-            self.set_bindnig_ty(let_stm_key, kind.clone(), &ty);
+            self.set_bindnig_ty(let_stm_key, kind, &ty);
             tuple_types.push(ty);
         }
 

@@ -1,5 +1,5 @@
 use crate::{
-    typed_ast::{ArrayType, FieldInfo},
+    typed_ast::{ArrayType, FieldInfo, LambdaParams},
     *,
 };
 
@@ -58,36 +58,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             ExprKind::Break | ExprKind::Continue => self
                 .s
                 .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key)),
-            ExprKind::Return(return_expr_key) => {
-                let (found_return_ty, return_expr_span) = return_expr_key.map_or_else(
-                    || (Ty::unit(), Span::default()),
-                    |expr_key| (self.infer(expr_key), self.get_expr_span(expr_key)),
-                );
-
-                if let Err(err) = self
-                    .s
-                    .unify(&self.current_scope_expected_return_ty, &found_return_ty)
-                {
-                    if self.is_current_fn_scope {
-                        let _fn = &self.ast.fns[self.current_fn_key];
-
-                        let type_expr_span = self.get_type_expr_span(_fn.return_type);
-
-                        self.add_type_mismatch_in_fn_return_ty_err(
-                            self.current_fn_key,
-                            &self.current_scope_expected_return_ty.clone(),
-                            &found_return_ty,
-                            type_expr_span,
-                            return_expr_span,
-                        );
-                    } else {
-                        // TODO: Show the error for lambda scope
-                    }
-                }
-
-                self.s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
-            }
+            ExprKind::Return(return_expr) => self.infer_return_expr(&return_expr.clone()), // TODO: Remove the clone
         };
 
         self.typed_ast.exprs.insert(expr_key, ty.clone());
@@ -145,7 +116,6 @@ impl<'a> SemanticsAnalyzer<'a> {
                 .get(&id)
                 .unwrap(),
             Item::FnParam { idx, fn_key: _ } => {
-                // TODO: Lambda params
                 let Type::FnPtr(FnPtrType {
                     params_types,
                     return_type: _,
@@ -156,6 +126,14 @@ impl<'a> SemanticsAnalyzer<'a> {
 
                 return params_types[idx as usize].clone();
             }
+            Item::LambdaParam { id, scope_key } => self
+                .typed_ast
+                .lambdas_params
+                .get(&scope_key)
+                .unwrap()
+                .bindings
+                .get(&id)
+                .unwrap(),
             _ => unreachable!(),
         };
 
@@ -584,7 +562,181 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
+    fn infer_return_expr(
+        &mut self,
+        ReturnExpr {
+            return_keyword_span,
+            expr,
+        }: &ReturnExpr,
+    ) -> Ty {
+        let (found_return_ty, span) = expr.map_or_else(
+            || (Ty::unit(), *return_keyword_span),
+            |expr_key| {
+                let span = self.get_expr_span(expr_key);
+                if self.current_lambda_scope_key.is_some()
+                    && self.current_lambda_first_implicit_return_ty_span.is_none()
+                {
+                    self.current_lambda_first_implicit_return_ty_span = Some(span);
+                }
+                (self.infer(expr_key), span)
+            },
+        );
+
+        if let Err(err) = self
+            .s
+            .unify(&self.current_scope_expected_return_ty, &found_return_ty)
+        {
+            if let Some(lambda_scope_key) = self.current_lambda_scope_key {
+                self.add_type_mismatch_in_lambda_return_ty_err(
+                    lambda_scope_key,
+                    &self.current_scope_expected_return_ty.clone(),
+                    &found_return_ty,
+                    span,
+                );
+            } else {
+                let _fn = &self.ast.fns[self.current_fn_key];
+
+                self.add_type_mismatch_in_fn_return_ty_err(
+                    self.current_fn_key,
+                    &self.current_scope_expected_return_ty.clone(),
+                    &found_return_ty,
+                    span,
+                );
+            }
+        }
+
+        self.s.new_never_ty_var(self.current_file_key, span)
+    }
+
     fn infer_lambda_expr(&mut self, LambdaExpr { params, body }: &LambdaExpr) -> Ty {
-        todo!()
+        let lambda_scope_key = *body;
+        let curly_braces_span = self.ast.scopes[lambda_scope_key].span;
+
+        self.typed_ast.lambdas_params.insert(
+            lambda_scope_key,
+            LambdaParams {
+                bindings: HashMap::new(),
+            },
+        );
+
+        let mut params_tys = ThinVec::with_capacity(params.len());
+
+        for Binding { kind, typ } in params {
+            let binding_ty = if let Some(type_expr_key) = typ {
+                self.analyze_type_expr(*type_expr_key).0
+            } else {
+                self.s
+                    .new_unknown_ty_var(self.current_file_key, kind.get_span())
+            };
+
+            self.set_bindnig_ty_for_lambda(lambda_scope_key, &kind, &binding_ty);
+
+            params_tys.push(binding_ty);
+        }
+
+        let outer_scope_expected_return_ty = self.current_scope_expected_return_ty.clone();
+        let outer_lambda_first_return_ty_span = self.current_lambda_first_implicit_return_ty_span;
+        let outer_scope_key = self.current_lambda_scope_key;
+
+        self.current_scope_expected_return_ty = self
+            .s
+            .new_unknown_ty_var(self.current_file_key, curly_braces_span);
+        self.current_lambda_first_implicit_return_ty_span = None;
+        self.current_lambda_scope_key = Some(lambda_scope_key);
+
+        let last_expr_return_ty = self.infer_scope(lambda_scope_key);
+
+        let expected_lambda_return_ty = self.current_scope_expected_return_ty.clone();
+
+        if let Err(err) = self
+            .s
+            .unify(&expected_lambda_return_ty, &last_expr_return_ty)
+        {
+            let span = if let Some(return_expr_key) = self.ast.scopes[lambda_scope_key].return_expr
+            {
+                self.get_expr_span(return_expr_key)
+            } else {
+                curly_braces_span
+            };
+            self.add_type_mismatch_in_lambda_return_ty_err(
+                lambda_scope_key,
+                &expected_lambda_return_ty,
+                &last_expr_return_ty,
+                span,
+            );
+        }
+
+        self.current_scope_expected_return_ty = outer_scope_expected_return_ty;
+        self.current_lambda_first_implicit_return_ty_span = outer_lambda_first_return_ty_span;
+        self.current_lambda_scope_key = outer_scope_key;
+
+        Ty::lambda(params_tys, expected_lambda_return_ty)
+    }
+
+    fn set_bindnig_ty_for_lambda(
+        &mut self,
+        lambda_scope_key: ScopeKey,
+        kind: &BindingKind,
+        ty: &Ty,
+    ) {
+        match kind {
+            BindingKind::Id(id) => {
+                self.typed_ast
+                    .lambdas_params
+                    .get_mut(&lambda_scope_key)
+                    .unwrap()
+                    .bindings
+                    .insert(id.id, ty.clone());
+            }
+            BindingKind::MutId { id, .. } => {
+                self.typed_ast
+                    .lambdas_params
+                    .get_mut(&lambda_scope_key)
+                    .unwrap()
+                    .bindings
+                    .insert(id.id, ty.clone());
+            }
+            BindingKind::Tuple(kinds, span) => {
+                if let Type::Tuple(TupleType { types }) = ty.inner() {
+                    if kinds.len() == types.len() {
+                        for i in 0..kinds.len() {
+                            let kind = &kinds[i];
+                            let ty = &types[i];
+                            self.set_bindnig_ty_for_lambda(lambda_scope_key, kind, ty);
+                        }
+                    } else {
+                        let found_ty = self.destructed_tuple_to_ty_with_unknown_for_lambda(
+                            lambda_scope_key,
+                            &kinds,
+                        );
+                        self.add_type_mismatch_err(ty, &found_ty, *span);
+                    }
+                } else {
+                    let found_ty = self
+                        .destructed_tuple_to_ty_with_unknown_for_lambda(lambda_scope_key, &kinds);
+                    if let Err(err) = self.s.unify(ty, &found_ty) {
+                        self.add_type_mismatch_err(&ty, &found_ty, *span);
+                    }
+                }
+            }
+        }
+    }
+
+    fn destructed_tuple_to_ty_with_unknown_for_lambda(
+        &mut self,
+        lambda_scope_key: ScopeKey,
+        kinds: &[BindingKind],
+    ) -> Ty {
+        let mut tuple_types = ThinVec::with_capacity(kinds.len());
+        for i in 0..kinds.len() {
+            let kind = &kinds[i];
+            let ty = self
+                .s
+                .new_unknown_ty_var(self.current_file_key, kind.get_span());
+            self.set_bindnig_ty_for_lambda(lambda_scope_key, kind, &ty);
+            tuple_types.push(ty);
+        }
+
+        Ty::tuple(tuple_types)
     }
 }

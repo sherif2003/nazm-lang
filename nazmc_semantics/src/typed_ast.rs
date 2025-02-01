@@ -20,6 +20,7 @@ pub struct TypedAST {
     /// Maps to fn ptr types
     pub fns_signatures: HashMap<FnKey, Ty>,
     pub lets: HashMap<LetStmKey, LetStm>,
+    pub lambdas_params: HashMap<ScopeKey, LambdaParams>,
     pub exprs: HashMap<ExprKey, Ty>,
 }
 
@@ -149,6 +150,10 @@ pub struct FieldInfo {
 }
 
 pub struct LetStm {
+    pub bindings: HashMap<IdKey, Ty>,
+}
+
+pub struct LambdaParams {
     pub bindings: HashMap<IdKey, Ty>,
 }
 

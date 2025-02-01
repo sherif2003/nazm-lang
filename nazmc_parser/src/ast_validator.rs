@@ -1,5 +1,5 @@
 use crate::*;
-use nazmc_ast::{ASTId, ExprKind, FileKey, ScopeEvent, ScopeKey};
+use nazmc_ast::{ASTId, ExprKind, FileKey, ReturnExpr, ScopeKey};
 use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
 use nazmc_diagnostics::eprint_diagnostics;
 use std::{collections::HashMap, process::exit};
@@ -404,21 +404,9 @@ impl<'a> ASTValidator<'a> {
                         }
                     }
 
-                    let return_type = if let Some(ColonWithType { colon: _, typ }) = f.return_type {
-                        self.lower_type(typ.unwrap())
-                    } else {
-                        let key = self.ast.types_exprs.tuples.push_and_get_key(
-                            nazmc_ast::TupleTypeExpr {
-                                types: ThinVec::new(),
-                                file_key: self.file_key,
-                                span: f.body.as_ref().unwrap().open_curly.span,
-                            },
-                        );
-
-                        let typ_expr = nazmc_ast::TypeExpr::Tuple(key);
-
-                        self.ast.types_exprs.all.push_and_get_key(typ_expr)
-                    };
+                    let return_type = f
+                        .return_type
+                        .map(|colon_with_type| self.lower_type(colon_with_type.typ.unwrap()));
 
                     let scope_key = self.lower_lambda_as_body(f.body.unwrap());
 
@@ -1328,7 +1316,13 @@ impl<'a> ASTValidator<'a> {
                     return_expr.return_keyword.span
                 };
 
-                self.new_expr(span, nazmc_ast::ExprKind::Return(expr))
+                self.new_expr(
+                    span,
+                    nazmc_ast::ExprKind::Return(Box::new(ReturnExpr {
+                        return_keyword_span: return_expr.return_keyword.span,
+                        expr,
+                    })),
+                )
             }
             AtomicExpr::Break(break_keyword) => {
                 self.new_expr(break_keyword.span, nazmc_ast::ExprKind::Break)

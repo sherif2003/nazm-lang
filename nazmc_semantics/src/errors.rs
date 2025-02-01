@@ -781,12 +781,56 @@ impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn add_type_mismatch_in_fn_return_ty_err(
         &mut self,
         fn_key: FnKey,
-        fn_return_ty: &Ty,
+        expected_fn_return_ty: &Ty,
         found_return_ty: &Ty,
-        type_expr_span: Span,
-        span: Span,
+        err_span: Span,
     ) {
         let _fn = &self.ast.fns[fn_key];
+
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], err_span.start);
+
+        code_window.mark_error(
+            err_span,
+            vec![
+                format!(
+                    "يُتوقّع أن تُرجِع الدالة قيمة من النوع `{}`",
+                    self.fmt_ty(&expected_fn_return_ty),
+                ),
+                format!(
+                    "ولكن تم العثور على النوع `{}`",
+                    self.fmt_ty(&found_return_ty)
+                ),
+            ],
+        );
+
+        code_window.mark_secondary(_fn.info.id_span, vec!["في هذه الدالة".into()]);
+
+        if let Some(type_expr_span) = _fn
+            .return_type
+            .map(|type_expr_key| self.get_type_expr_span(type_expr_key))
+        {
+            if err_span != type_expr_span {
+                code_window.mark_secondary(
+                    type_expr_span,
+                    vec!["هنا تم تحديد نوع القيمة التي سترجعها الدالة".into()],
+                );
+            }
+        }
+
+        let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![code_window]);
+        self.diagnostics.push(diagnostic);
+    }
+
+    pub(crate) fn add_type_mismatch_in_lambda_return_ty_err(
+        &mut self,
+        lambda_scope_key: ScopeKey,
+        expteced_lambda_return_ty: &Ty,
+        found_return_ty: &Ty,
+        span: Span,
+    ) {
+        let first_implicit_return_ty_span =
+            self.current_lambda_first_implicit_return_ty_span.unwrap();
 
         let mut code_window = CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
 
@@ -794,23 +838,23 @@ impl<'a> SemanticsAnalyzer<'a> {
             span,
             vec![format!(
                 "يُتوقّع النوع `{}` ولكن تم العثور على النوع `{}`",
-                self.fmt_ty(&fn_return_ty),
+                self.fmt_ty(&expteced_lambda_return_ty),
                 self.fmt_ty(&found_return_ty)
             )],
         );
 
-        if self.ast.scopes[_fn.scope_key].return_expr.is_some() {
-            code_window.mark_secondary(_fn.info.id_span, vec!["في هذه الدالة".into()]);
-            code_window.mark_secondary(
-                type_expr_span,
-                vec!["هنا تم تحديد نوع القيمة التي سترجعها الدالة".into()],
-            );
+        if self.ast.scopes[lambda_scope_key].return_expr.is_some() {
+            let curly_braces_span = self.ast.scopes[lambda_scope_key].span;
+            code_window.mark_secondary(curly_braces_span, vec!["في تعبير اللامدا هذا".into()]);
         } else {
-            code_window.mark_secondary(
-                _fn.info.id_span,
-                vec!["هذه الدالة تقوم ضمنياً بإرجاع النوع `()`".into()],
-            );
+            code_window
+                .mark_secondary(span, vec!["تعبير اللامدا هذا يرجع ضمنياً النوع `()`".into()]);
         }
+
+        code_window.mark_secondary(
+            first_implicit_return_ty_span,
+            vec!["تم تحديد نوع القيمة التي سترجع هنا".into()],
+        );
 
         let diagnostic = Diagnostic::error("أنواع غير متطابقة".into(), vec![code_window]);
         self.diagnostics.push(diagnostic);

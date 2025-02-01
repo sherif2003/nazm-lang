@@ -271,7 +271,7 @@ pub struct FieldInfo {
 pub struct Fn {
     pub info: ItemInfo,
     pub params: ThinVec<(ASTId, TypeExprKey)>,
-    pub return_type: TypeExprKey,
+    pub return_type: Option<TypeExprKey>,
     pub scope_key: ScopeKey,
 }
 
@@ -337,7 +337,7 @@ pub enum ExprKind {
     Lambda(Box<LambdaExpr>),
     UnaryOp(Box<UnaryOpExpr>),
     BinaryOp(Box<BinaryOpExpr>),
-    Return(Option<ExprKey>),
+    Return(Box<ReturnExpr>),
     Break,
     Continue,
     On,
@@ -425,6 +425,12 @@ pub struct IfExpr {
 pub struct LambdaExpr {
     pub params: ThinVec<Binding>,
     pub body: ScopeKey,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReturnExpr {
+    pub return_keyword_span: Span,
+    pub expr: Option<ExprKey>,
 }
 
 #[derive(Clone, Debug)]
