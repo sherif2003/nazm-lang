@@ -49,6 +49,9 @@ pub struct SemanticsAnalyzer<'a> {
     current_file_key: FileKey,
     current_fn_key: FnKey,
     s: Substitution,
+    /// For fns and lambdas only
+    current_scope_expected_return_ty: Ty,
+    is_current_fn_scope: bool,
 }
 
 impl<'a> SemanticsAnalyzer<'a> {
@@ -91,12 +94,42 @@ impl<'a> SemanticsAnalyzer<'a> {
             self.analyze_fn_signature(fn_key);
         }
 
+        // Will be restored to true by inner lambda scopes
+        self.is_current_fn_scope = true;
+
         // TODO: Remove the clone
         // Don't take the ownership as the errors module requires the access to them
         for (fn_key, _fn) in self.ast.fns.clone().iter_enumerated() {
             self.current_file_key = _fn.info.file_key;
             self.current_fn_key = fn_key;
-            self.analyze_scope(_fn.scope_key);
+
+            self.current_scope_expected_return_ty =
+                if let Type::FnPtr(fn_ptr) = &*self.typed_ast.fns_signatures[&fn_key].borrow() {
+                    fn_ptr.return_type.clone()
+                } else {
+                    unreachable!()
+                };
+
+            let found_return_ty = self.infer_scope(_fn.scope_key);
+
+            if let Err(err) = self
+                .s
+                .unify(&self.current_scope_expected_return_ty, &found_return_ty)
+            {
+                let type_expr_span = self.get_type_expr_span(_fn.return_type);
+
+                let span = self.ast.scopes[_fn.scope_key]
+                    .return_expr
+                    .map_or(type_expr_span, |expr_key| self.get_expr_span(expr_key));
+
+                self.add_type_mismatch_in_fn_return_ty_err(
+                    fn_key,
+                    &self.current_scope_expected_return_ty.clone(),
+                    &found_return_ty,
+                    type_expr_span,
+                    span,
+                );
+            }
         }
 
         let unknown_vars = self.s.collect();

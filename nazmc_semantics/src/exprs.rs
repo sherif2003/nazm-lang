@@ -6,9 +6,11 @@ use crate::{
 impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn infer_scope(&mut self, scope_key: ScopeKey) -> Ty {
         self.analyze_scope(scope_key);
+
         let return_ty = self.ast.scopes[scope_key]
             .return_expr
             .map_or_else(|| Ty::unit(), |expr_key| self.infer(expr_key));
+
         return_ty
     }
 
@@ -44,19 +46,48 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.infer_fields_struct_expr(&fields_struct_expr.clone(), expr_key)
             }
             ExprKind::If(if_expr) => self.infer_if_expr(&if_expr.clone()), // TODO: Remove the clone
-            ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
             ExprKind::Field(field_expr) => {
                 self.infer_field_expr(&field_expr.clone(), expr_key) // TODO: Remove the clone
             }
+            ExprKind::Lambda(lambda_expr) => self.infer_lambda_expr(&lambda_expr.clone()), // TODO: Remove the clone
+            ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
             ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
-            ExprKind::Lambda(lambda_expr) => todo!(),
             ExprKind::UnaryOp(unary_op_expr) => todo!(),
             ExprKind::BinaryOp(binary_op_expr) => todo!(),
-            ExprKind::Return(expr_key) => todo!(),
+            ExprKind::On => todo!(),
             ExprKind::Break | ExprKind::Continue => self
                 .s
                 .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key)),
-            ExprKind::On => todo!(),
+            ExprKind::Return(return_expr_key) => {
+                let (found_return_ty, return_expr_span) = return_expr_key.map_or_else(
+                    || (Ty::unit(), Span::default()),
+                    |expr_key| (self.infer(expr_key), self.get_expr_span(expr_key)),
+                );
+
+                if let Err(err) = self
+                    .s
+                    .unify(&self.current_scope_expected_return_ty, &found_return_ty)
+                {
+                    if self.is_current_fn_scope {
+                        let _fn = &self.ast.fns[self.current_fn_key];
+
+                        let type_expr_span = self.get_type_expr_span(_fn.return_type);
+
+                        self.add_type_mismatch_in_fn_return_ty_err(
+                            self.current_fn_key,
+                            &self.current_scope_expected_return_ty.clone(),
+                            &found_return_ty,
+                            type_expr_span,
+                            return_expr_span,
+                        );
+                    } else {
+                        // TODO: Show the error for lambda scope
+                    }
+                }
+
+                self.s
+                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+            }
         };
 
         self.typed_ast.exprs.insert(expr_key, ty.clone());
@@ -551,5 +582,9 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
             }
         }
+    }
+
+    fn infer_lambda_expr(&mut self, LambdaExpr { params, body }: &LambdaExpr) -> Ty {
+        todo!()
     }
 }
