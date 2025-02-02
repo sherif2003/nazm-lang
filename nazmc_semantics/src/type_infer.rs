@@ -17,6 +17,50 @@ pub(crate) enum TyVarState {
     UnspecifiedFloat,
 }
 
+impl TyVarState {
+    fn get_super_type(t1: TyVarState, t2: TyVarState) -> Option<TyVarState> {
+        if Self::cmp(t1, t2) {
+            Some(t2)
+        } else if Self::cmp(t2, t1) {
+            Some(t1)
+        } else {
+            None
+        }
+    }
+
+    fn get_sub_type(t1: TyVarState, t2: TyVarState) -> Option<TyVarState> {
+        if Self::cmp(t1, t2) {
+            Some(t1)
+        } else if Self::cmp(t2, t1) {
+            Some(t2)
+        } else {
+            None
+        }
+    }
+
+    fn cmp(sub: TyVarState, sup: TyVarState) -> bool {
+        match (sub, sup) {
+            (_, TyVarState::Unknown)
+            | (TyVarState::Never, _)
+            | (
+                TyVarState::UnspecifiedFloat,
+                TyVarState::UnspecifiedFloat | TyVarState::UnspecifiedNumber,
+            )
+            | (
+                TyVarState::UnspecifiedUnsignedInt,
+                TyVarState::UnspecifiedUnsignedInt | TyVarState::UnspecifiedNumber,
+            )
+            | (
+                TyVarState::UnspecifiedSignedInt,
+                TyVarState::UnspecifiedUnsignedInt
+                | TyVarState::UnspecifiedSignedInt
+                | TyVarState::UnspecifiedNumber,
+            ) => true,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct Substitution {
     pub(crate) all_ty_vars: TiVec<TypeVarKey, (TyVarState, FileKey, Span)>,
@@ -211,64 +255,79 @@ impl Substitution {
             });
         }
 
-        if let (_, Type::TypeVar(_))
-        | (TyVarState::Unknown | TyVarState::Never, _)
-        | (
-            TyVarState::UnspecifiedNumber,
-            Type::Concrete(
-                ConcreteType::I
-                | ConcreteType::I1
-                | ConcreteType::I2
-                | ConcreteType::I4
-                | ConcreteType::I8
-                | ConcreteType::U
-                | ConcreteType::U1
-                | ConcreteType::U2
-                | ConcreteType::U4
-                | ConcreteType::U8
-                | ConcreteType::F4
-                | ConcreteType::F8,
-            ),
-        )
-        | (
-            TyVarState::UnspecifiedUnsignedInt,
-            Type::Concrete(
-                ConcreteType::I
-                | ConcreteType::I1
-                | ConcreteType::I2
-                | ConcreteType::I4
-                | ConcreteType::I8
-                | ConcreteType::U
-                | ConcreteType::U1
-                | ConcreteType::U2
-                | ConcreteType::U4
-                | ConcreteType::U8,
-            ),
-        )
-        | (
-            TyVarState::UnspecifiedSignedInt,
-            Type::Concrete(
-                ConcreteType::I
-                | ConcreteType::I1
-                | ConcreteType::I2
-                | ConcreteType::I4
-                | ConcreteType::I8,
-            ),
-        )
-        | (TyVarState::UnspecifiedFloat, Type::Concrete(ConcreteType::F4 | ConcreteType::F8)) =
-            (self.all_ty_vars[ty_var_key].0, &*ty.borrow())
-        {
-            self.substitutions.insert(ty_var_key, ty.clone());
+        let t1 = self.all_ty_vars[ty_var_key].0;
 
-            Ok(())
-        } else {
-            Err(TypeUnificationErr::CannotUnifyTyVar {
-                ty_var_key: ty_var_key,
-                ty: ty.clone(),
-            })
-        }
+        match (self.all_ty_vars[ty_var_key].0, &*ty.borrow()) {
+            (_, Type::TypeVar(ty_var_key2)) => {
+                let t2 = self.all_ty_vars[*ty_var_key2].0;
+                if let Some(sub_type) = TyVarState::get_sub_type(t1, t2) {
+                    self.all_ty_vars[ty_var_key].0 = sub_type;
+                    self.all_ty_vars[*ty_var_key2].0 = sub_type;
+                } else {
+                    return Err(TypeUnificationErr::CannotUnifyTyVar {
+                        ty_var_key: ty_var_key,
+                        ty: ty.clone(),
+                    });
+                }
+            }
+            (TyVarState::Unknown | TyVarState::Never, _)
+            | (
+                TyVarState::UnspecifiedNumber,
+                Type::Concrete(
+                    ConcreteType::I
+                    | ConcreteType::I1
+                    | ConcreteType::I2
+                    | ConcreteType::I4
+                    | ConcreteType::I8
+                    | ConcreteType::U
+                    | ConcreteType::U1
+                    | ConcreteType::U2
+                    | ConcreteType::U4
+                    | ConcreteType::U8
+                    | ConcreteType::F4
+                    | ConcreteType::F8,
+                ),
+            )
+            | (
+                TyVarState::UnspecifiedUnsignedInt,
+                Type::Concrete(
+                    ConcreteType::I
+                    | ConcreteType::I1
+                    | ConcreteType::I2
+                    | ConcreteType::I4
+                    | ConcreteType::I8
+                    | ConcreteType::U
+                    | ConcreteType::U1
+                    | ConcreteType::U2
+                    | ConcreteType::U4
+                    | ConcreteType::U8,
+                ),
+            )
+            | (
+                TyVarState::UnspecifiedSignedInt,
+                Type::Concrete(
+                    ConcreteType::I
+                    | ConcreteType::I1
+                    | ConcreteType::I2
+                    | ConcreteType::I4
+                    | ConcreteType::I8,
+                ),
+            )
+            | (TyVarState::UnspecifiedFloat, Type::Concrete(ConcreteType::F4 | ConcreteType::F8)) =>
+                {}
+            _ => {
+                return Err(TypeUnificationErr::CannotUnifyTyVar {
+                    ty_var_key: ty_var_key,
+                    ty: ty.clone(),
+                })
+            }
+        };
+
+        self.substitutions.insert(ty_var_key, ty.clone());
+        Ok(())
     }
 
+    #[inline]
     pub(crate) fn check_map_to_unspecified_number(&self, ty_var_key: TypeVarKey) -> bool {
         matches!(
             self.all_ty_vars[ty_var_key].0,

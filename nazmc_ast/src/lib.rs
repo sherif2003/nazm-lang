@@ -488,9 +488,9 @@ pub enum BinOp {
     TimesAssign,
     DivAssign,
     ModAssign,
-    BAndAssign,
     BOrAssign,
     XorAssign,
-    ShlAssign,
+    BAndAssign,
     ShrAssign,
+    ShlAssign,
 }

@@ -785,16 +785,17 @@ impl<'a> SemanticsAnalyzer<'a> {
             | BinOp::CloseOpenRange
             | BinOp::OpenCloseRange
             | BinOp::CloseCloseRange => todo!(), // TODO
-            BinOp::BOr
-            | BinOp::Xor
-            | BinOp::BAnd
-            | BinOp::Shr
-            | BinOp::Shl
-            | BinOp::Plus
-            | BinOp::Minus
-            | BinOp::Times
-            | BinOp::Div
-            | BinOp::Mod => {
+            BinOp::BOr | BinOp::Xor | BinOp::BAnd | BinOp::Shr | BinOp::Shl => {
+                if self.unify_with_int_num(&left_ty, *left, op, op_span_cursor) {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
+                } else {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_int_num(&right_ty, *right, op, op_span_cursor);
+                }
+                left_ty
+            }
+            BinOp::Plus | BinOp::Minus | BinOp::Times | BinOp::Div | BinOp::Mod => {
                 if self.unify_with_num(&left_ty, *left, op, op_span_cursor) {
                     let right_ty = self.infer(*right);
                     self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
@@ -804,16 +805,25 @@ impl<'a> SemanticsAnalyzer<'a> {
                 }
                 left_ty
             }
+            BinOp::BOrAssign
+            | BinOp::XorAssign
+            | BinOp::BAndAssign
+            | BinOp::ShrAssign
+            | BinOp::ShlAssign => {
+                if self.unify_with_int_num(&left_ty, *left, op, op_span_cursor) {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
+                } else {
+                    let right_ty = self.infer(*right);
+                    self.unify_with_int_num(&right_ty, *right, op, op_span_cursor);
+                }
+                Ty::unit()
+            }
             BinOp::PlusAssign
             | BinOp::MinusAssign
             | BinOp::TimesAssign
             | BinOp::DivAssign
-            | BinOp::ModAssign
-            | BinOp::BAndAssign
-            | BinOp::BOrAssign
-            | BinOp::XorAssign
-            | BinOp::ShlAssign
-            | BinOp::ShrAssign => {
+            | BinOp::ModAssign => {
                 if self.unify_with_num(&left_ty, *left, op, op_span_cursor) {
                     let right_ty = self.infer(*right);
                     self.unify_with_check(&left_ty, &right_ty, *right, op, op_span_cursor);
@@ -822,6 +832,49 @@ impl<'a> SemanticsAnalyzer<'a> {
                     self.unify_with_num(&right_ty, *right, op, op_span_cursor);
                 }
                 Ty::unit()
+            }
+        }
+    }
+
+    fn unify_with_int_num(
+        &mut self,
+        found_ty: &Ty,
+        expr_key: ExprKey,
+        op: &BinOp,
+        op_span_cursor: &SpanCursor,
+    ) -> bool {
+        let found_ty = self.s.apply(found_ty);
+
+        match found_ty.inner() {
+            Type::Concrete(
+                ConcreteType::I
+                | ConcreteType::I1
+                | ConcreteType::I2
+                | ConcreteType::I4
+                | ConcreteType::I8
+                | ConcreteType::U
+                | ConcreteType::U1
+                | ConcreteType::U2
+                | ConcreteType::U4
+                | ConcreteType::U8,
+            ) => true,
+            Type::TypeVar(ty_var_key) => match self.s.all_ty_vars[ty_var_key].0 {
+                TyVarState::UnspecifiedNumber | TyVarState::Never | TyVarState::Unknown => {
+                    self.s.all_ty_vars[ty_var_key].0 = TyVarState::UnspecifiedUnsignedInt;
+                    true
+                }
+                TyVarState::UnspecifiedUnsignedInt | TyVarState::UnspecifiedSignedInt => true,
+                TyVarState::UnspecifiedFloat => false,
+            },
+            _ => {
+                self.add_type_mismatch_in_bin_op_err(
+                    &Ty::i4(),
+                    &found_ty,
+                    expr_key,
+                    op,
+                    op_span_cursor,
+                );
+                false
             }
         }
     }
@@ -878,7 +931,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     ) -> bool {
         if let Err(err) = self.s.unify(expected_ty, found_ty) {
             self.add_type_mismatch_in_bin_op_err(
-                &Ty::i4(),
+                expected_ty,
                 &found_ty,
                 expr_key,
                 op,
