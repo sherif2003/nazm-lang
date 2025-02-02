@@ -628,6 +628,12 @@ impl<'a> ASTValidator<'a> {
                     }
                 }
                 Type::Paren(paren_type) => {
+                    let span = paren_type
+                        .tuple
+                        .open_delim
+                        .span
+                        .merged_with(&paren_type.tuple.close_delim.unwrap().span);
+
                     let mut types = ThinVec::new();
 
                     let mut trailing_comma_in_types = false;
@@ -651,56 +657,18 @@ impl<'a> ASTValidator<'a> {
                     if let Some(lambda_type) = paren_type.lambda {
                         let return_type = self.lower_type(lambda_type.typ.unwrap());
 
-                        let span = match self.ast.types_exprs.all[return_type] {
-                            nazmc_ast::TypeExpr::Path(type_path_key) => {
-                                self.ast.types_exprs.paths[type_path_key].item.span
-                            }
-                            nazmc_ast::TypeExpr::Paren(paren_type_expr_key) => {
-                                self.ast.types_exprs.parens[paren_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Slice(slice_type_expr_key) => {
-                                self.ast.types_exprs.slices[slice_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Ptr(ptr_type_expr_key) => {
-                                self.ast.types_exprs.ptrs[ptr_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Ref(ref_type_expr_key) => {
-                                self.ast.types_exprs.refs[ref_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
-                                self.ast.types_exprs.ptrs_mut[ptr_mut_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::RefMut(ref_mut_type_expr_key) => {
-                                self.ast.types_exprs.refs_mut[ref_mut_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Tuple(tuple_type_expr_key) => {
-                                self.ast.types_exprs.tuples[tuple_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Array(array_type_expr_key) => {
-                                self.ast.types_exprs.arrays[array_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Lambda(lambda_type_expr_key) => {
-                                self.ast.types_exprs.lambdas[lambda_type_expr_key].span
-                            }
-                        };
-
                         let key = self.ast.types_exprs.lambdas.push_and_get_key(
                             nazmc_ast::LambdaTypeExpr {
                                 params_types: types,
                                 return_type,
                                 file_key: self.file_key,
-                                span,
+                                params_span: span,
+                                arrow_span: lambda_type.r_arrow.span,
                             },
                         );
 
                         nazmc_ast::TypeExpr::Lambda(key)
                     } else {
-                        let span = paren_type
-                            .tuple
-                            .open_delim
-                            .span
-                            .merged_with(&paren_type.tuple.close_delim.unwrap().span);
-
                         if !trailing_comma_in_types && types.len() == 1 {
                             let key = self.ast.types_exprs.parens.push_and_get_key(
                                 nazmc_ast::ParenTypeExpr {

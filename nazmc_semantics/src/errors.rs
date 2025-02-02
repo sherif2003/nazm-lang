@@ -134,13 +134,25 @@ impl<'a> SemanticsAnalyzer<'a> {
             TypeExpr::Slice(slice_type_expr_key) => {
                 self.ast.types_exprs.slices[*slice_type_expr_key].span
             }
-            TypeExpr::Ptr(ptr_type_expr_key) => self.ast.types_exprs.ptrs[*ptr_type_expr_key].span,
-            TypeExpr::Ref(ref_type_expr_key) => self.ast.types_exprs.refs[*ref_type_expr_key].span,
+            TypeExpr::Ptr(ptr_type_expr_key) => {
+                let expr = &self.ast.types_exprs.ptrs[*ptr_type_expr_key];
+                expr.span
+                    .merged_with(&self.get_type_expr_span(expr.underlying_typ))
+            }
+            TypeExpr::Ref(ref_type_expr_key) => {
+                let expr = &self.ast.types_exprs.refs[*ref_type_expr_key];
+                expr.span
+                    .merged_with(&self.get_type_expr_span(expr.underlying_typ))
+            }
             TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
-                self.ast.types_exprs.ptrs_mut[*ptr_mut_type_expr_key].span
+                let expr = &self.ast.types_exprs.ptrs_mut[*ptr_mut_type_expr_key];
+                expr.span
+                    .merged_with(&self.get_type_expr_span(expr.underlying_typ))
             }
             TypeExpr::RefMut(ref_mut_type_expr_key) => {
-                self.ast.types_exprs.refs_mut[*ref_mut_type_expr_key].span
+                let expr = &self.ast.types_exprs.refs_mut[*ref_mut_type_expr_key];
+                expr.span
+                    .merged_with(&self.get_type_expr_span(expr.underlying_typ))
             }
             TypeExpr::Tuple(tuple_type_expr_key) => {
                 self.ast.types_exprs.tuples[*tuple_type_expr_key].span
@@ -149,7 +161,9 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.ast.types_exprs.arrays[*array_type_expr_key].span
             }
             TypeExpr::Lambda(lambda_type_expr_key) => {
-                self.ast.types_exprs.lambdas[*lambda_type_expr_key].span
+                let expr = &self.ast.types_exprs.lambdas[*lambda_type_expr_key];
+                expr.params_span
+                    .merged_with(&self.get_type_expr_span(expr.return_type))
             }
         }
     }

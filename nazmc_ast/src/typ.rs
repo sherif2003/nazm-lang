@@ -91,5 +91,6 @@ pub struct LambdaTypeExpr {
     pub params_types: ThinVec<TypeExprKey>,
     pub return_type: TypeExprKey,
     pub file_key: FileKey,
-    pub span: Span,
+    pub params_span: Span,
+    pub arrow_span: Span,
 }
