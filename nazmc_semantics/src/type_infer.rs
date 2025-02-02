@@ -12,6 +12,7 @@ pub(crate) enum TyVarState {
     Unknown,
     Never,
     UnspecifiedNumber,
+    UnspecifiedSignedNumber,
     UnspecifiedUnsignedInt,
     UnspecifiedSignedInt,
     UnspecifiedFloat,
@@ -44,7 +45,9 @@ impl TyVarState {
             | (TyVarState::Never, _)
             | (
                 TyVarState::UnspecifiedFloat,
-                TyVarState::UnspecifiedFloat | TyVarState::UnspecifiedNumber,
+                TyVarState::UnspecifiedFloat
+                | TyVarState::UnspecifiedNumber
+                | TyVarState::UnspecifiedSignedNumber,
             )
             | (
                 TyVarState::UnspecifiedUnsignedInt,
@@ -54,7 +57,8 @@ impl TyVarState {
                 TyVarState::UnspecifiedSignedInt,
                 TyVarState::UnspecifiedUnsignedInt
                 | TyVarState::UnspecifiedSignedInt
-                | TyVarState::UnspecifiedNumber,
+                | TyVarState::UnspecifiedNumber
+                | TyVarState::UnspecifiedSignedNumber,
             ) => true,
             _ => false,
         }
@@ -332,6 +336,7 @@ impl Substitution {
         matches!(
             self.all_ty_vars[ty_var_key].0,
             TyVarState::UnspecifiedNumber
+                | TyVarState::UnspecifiedSignedNumber
                 | TyVarState::UnspecifiedUnsignedInt
                 | TyVarState::UnspecifiedSignedInt
                 | TyVarState::UnspecifiedFloat
@@ -361,7 +366,9 @@ impl Substitution {
                     self.final_apply(unknown_vars, &substituted_ty.clone()) // Apply recursively in case of nested substitutions
                 } else {
                     match self.all_ty_vars[*type_var_key].0 {
-                        TyVarState::Unknown | TyVarState::UnspecifiedNumber => {
+                        TyVarState::Unknown
+                        | TyVarState::UnspecifiedNumber
+                        | TyVarState::UnspecifiedSignedNumber => {
                             self.substitutions.insert(*type_var_key, Ty::never());
                             unknown_vars.insert(*type_var_key, ());
                             Ty::never()

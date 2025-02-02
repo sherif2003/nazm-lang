@@ -489,17 +489,18 @@ impl NazmcParse for ParseResult<UnaryOp> {
                     SymbolKind::Star if !match_peek_symbols!(iter, Equal) => UnaryOpToken::Deref,
                     SymbolKind::Hash => {
                         let peek_idx = iter.peek_idx;
+                        iter.next_non_space_or_comment();
                         if let Some(Token {
                             span: mut_keyword_span,
                             kind: TokenKind::Keyword(KeywordKind::Mut),
                             ..
-                        }) = iter.next_non_space_or_comment()
+                        }) = iter.recent()
                         {
                             span = span.merged_with(mut_keyword_span);
-                            UnaryOpToken::Borrow
+                            UnaryOpToken::BorrowMut
                         } else {
                             iter.peek_idx = peek_idx;
-                            UnaryOpToken::BorrowMut
+                            UnaryOpToken::Borrow
                         }
                     }
                     _ => {

@@ -84,6 +84,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             TyVarState::Unknown => format!("_"),
             TyVarState::Never => format!("!!"),
             TyVarState::UnspecifiedNumber => format!("{{عدد}}"),
+            TyVarState::UnspecifiedSignedNumber => format!("{{عدد}}"),
             TyVarState::UnspecifiedUnsignedInt => format!("{{عدد}}"),
             TyVarState::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
             TyVarState::UnspecifiedFloat => format!("{{عدد عشري}}"),
@@ -863,65 +864,41 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.diagnostics.push(diagnostic);
     }
 
-    pub(crate) fn add_type_mismatch_in_bin_op_err(
+    pub(crate) fn add_type_mismatch_in_op_err(
         &mut self,
         expected_ty: &Ty,
         found_ty: &Ty,
         expr_key: ExprKey,
-        op: &BinOp,
-        op_span_cursor: &SpanCursor,
+        op_span: Span,
     ) {
         self.add_type_mismatch_err(expected_ty, found_ty, self.get_expr_span(expr_key));
-
-        let op_len = match op {
-            BinOp::OpenOpenRange => 4,
-            BinOp::CloseOpenRange | BinOp::OpenCloseRange | BinOp::ShlAssign | BinOp::ShrAssign => {
-                3
-            }
-
-            BinOp::LOr
-            | BinOp::LAnd
-            | BinOp::EqualEqual
-            | BinOp::NotEqual
-            | BinOp::GE
-            | BinOp::LE
-            | BinOp::Shr
-            | BinOp::Shl
-            | BinOp::PlusAssign
-            | BinOp::MinusAssign
-            | BinOp::TimesAssign
-            | BinOp::DivAssign
-            | BinOp::ModAssign
-            | BinOp::BAndAssign
-            | BinOp::BOrAssign
-            | BinOp::XorAssign
-            | BinOp::CloseCloseRange => 2,
-
-            BinOp::GT
-            | BinOp::LT
-            | BinOp::BOr
-            | BinOp::Xor
-            | BinOp::BAnd
-            | BinOp::Plus
-            | BinOp::Minus
-            | BinOp::Times
-            | BinOp::Div
-            | BinOp::Mod
-            | BinOp::Assign => 1,
-        };
-
-        let op_span = Span {
-            start: *op_span_cursor,
-            end: SpanCursor {
-                line: op_span_cursor.line,
-                col: op_span_cursor.col + op_len,
-            },
-        };
 
         self.diagnostics
             .last_mut()
             .unwrap()
             .last_code_window()
             .mark_secondary(op_span, vec!["هذا المُؤثِّر".into()]);
+    }
+
+    pub(crate) fn add_cannot_deref_type(&mut self, ty: &Ty, expr_key: ExprKey, op_span: Span) {
+        let expr_span = self.get_expr_span(expr_key);
+        let ty = self.fmt_ty(ty);
+
+        let mut code_window =
+            CodeWindow::new(&self.files_infos[self.current_file_key], expr_span.start);
+        code_window.mark_secondary(
+            op_span,
+            vec!["المُؤثِّر `*` يمكن تطبيقه فقط على المؤشِّرات".into()],
+        );
+        code_window.mark_error(
+            expr_span,
+            vec![format!("يُتوقّع مؤشِّر، ولكن تم العثور على `{}`", ty)],
+        );
+
+        let diagnostic = Diagnostic::error(
+            format!("لا يمكن تطبيق المُؤثِّر `*` على النوع `{}`", ty),
+            vec![code_window],
+        );
+        self.diagnostics.push(diagnostic);
     }
 }
