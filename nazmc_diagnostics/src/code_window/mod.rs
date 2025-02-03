@@ -424,7 +424,7 @@ impl<'a> CodeLine<'a> {
         // The number of bars (`|`) between the code and the repeated underscores (`_`) of multiline marker
         let mut next_multline_margin = 0;
 
-        for col in self.markers.keys().sorted().rev() {
+        for (col_enum, col) in self.markers.keys().sorted().rev().enumerate() {
             painter.move_to(painter_local_zero);
             connections_painter.move_to(connections_painter_local_zero);
 
@@ -474,11 +474,22 @@ impl<'a> CodeLine<'a> {
                         next_labels_margin +=
                             labels.len() - (labels.len() > 1 && next_labels_margin == 0) as usize;
 
+                        // Add a space if it is the first marker from the end
+                        if col_enum == 0 {
+                            painter.move_right();
+                        }
+
                         for (i, label) in labels.iter().enumerate() {
                             if i != 0 {
                                 painter.move_down();
                             }
+
                             painter.paint(marker.clone_with_str(label));
+                        }
+
+                        // Remove the added space
+                        if col_enum == 0 {
+                            painter.move_left();
                         }
                     } else if next_labels_margin == 0 {
                         // Increase the labels margin if we are on the first marker from reverse and there is no labels found
@@ -515,11 +526,21 @@ impl<'a> CodeLine<'a> {
                         next_labels_margin +=
                             labels.len() - (labels.len() > 1 && next_labels_margin == 0) as usize;
 
+                        // Add a space if it is the first marker from the end
+                        if col_enum == 0 {
+                            painter.move_right();
+                        }
+
                         for (i, label) in labels.iter().enumerate() {
                             if i != 0 {
                                 painter.move_down();
                             }
                             painter.paint(marker.clone_with_str(label));
+                        }
+
+                        // Remove the added space
+                        if col_enum == 0 {
+                            painter.move_left();
                         }
                     }
 
@@ -528,8 +549,12 @@ impl<'a> CodeLine<'a> {
                         .move_down_by(next_multline_margin)
                         .move_left();
 
-                    for _ in 0..*col {
-                        painter.move_left().paint(marker.clone_with_char('_'));
+                    // If the end col is 1 it will override the marker putted there
+                    // As calling move_left will not do any thing but it will paint '_'
+                    if *col != 1 {
+                        for _ in 0..*col {
+                            painter.move_left().paint(marker.clone_with_char('_'));
+                        }
                     }
 
                     connections_painter.move_down_by(next_multline_margin);
@@ -718,7 +743,8 @@ mod tests {
     }
 
     macro_rules! get_code_reporter {
-        () => {
+        () => {{
+            rtl();
             CodeWindow {
                 file_path: "اختبار.نظم",
                 file_lines: &[
@@ -730,25 +756,39 @@ mod tests {
                     "حجز متغير و = 555؛".to_string(),
                     "حجز متغير ز = 555؛".to_string(),
                     "حجز متغير ح = 555؛".to_string(),
+                    "حجز متغير ط = 555؛".to_string(),
+                    "حجز متغير ي = 555؛".to_string(),
                     "حجز متغير ك = 555؛".to_string(),
                     "حجز متغير ل = 555؛".to_string(),
                     "حجز متغير م = 555؛".to_string(),
                     "حجز متغير ن = 555؛".to_string(),
-                    "حجز متغير ز = 555؛".to_string(),
+                    "حجز متغير س = 555؛".to_string(),
+                    "حجز متغير ع = 555؛".to_string(),
+                    "حجز متغير ف = 555؛".to_string(),
+                    "حجز متغير ص = 555؛".to_string(),
+                    "حجز متغير ق = 555؛".to_string(),
+                    "حجز متغير ر = 555؛".to_string(),
+                    "حجز متغير ش = 555؛".to_string(),
+                    "حجز متغير ت = 555؛".to_string(),
+                    "حجز متغير ث = 555؛".to_string(),
+                    "حجز متغير خ = 555؛".to_string(),
+                    "حجز متغير ذ = 555؛".to_string(),
+                    "حجز متغير ض = 555؛".to_string(),
+                    "حجز متغير ظ = 555؛".to_string(),
+                    "حجز متغير غ = 555؛".to_string(),
                 ],
                 cursor: SpanCursor { line: 0, col: 0 },
                 code_lines: HashMap::new(),
             }
-        };
+        }};
     }
 
     #[test]
     fn test_one_line() {
-        rtl();
         let mut reporter = get_code_reporter!();
 
         reporter.mark(
-            Span::new((0, 0), (0, 4)),
+            Span::new((0, 0), (0, 3)),
             '?',
             Style::new().blue().cyan(),
             vec!["القيمة ليست متغيرة".to_string()],
@@ -759,7 +799,6 @@ mod tests {
 
     #[test]
     fn test_multi_line() {
-        rtl();
         let mut reporter = get_code_reporter!();
 
         reporter.mark(
@@ -774,13 +813,12 @@ mod tests {
 
     #[test]
     fn test_multi_line_ends_at_first_column() {
-        rtl();
         let mut reporter = get_code_reporter!();
 
         reporter.mark(
-            Span::new((0, 4), (1, 0)),
+            Span::new((0, 4), (1, 1)),
             '^',
-            Style::new().red().bold(),
+            Style::new().italic().red().bold(),
             vec!["القيمة ليست متغيرة".to_string()],
         );
 
@@ -789,20 +827,19 @@ mod tests {
 
     #[test]
     fn test_reporting_complex() {
-        rtl();
         let mut reporter = get_code_reporter!();
 
         reporter
             .mark(
-                Span::new((0, 0), (0, 4)),
+                Span::new((0, 0), (0, 3)),
                 '?',
-                Style::new().blue().cyan(),
+                Style::new().cyan(),
                 vec!["القيمة ليست متغيرة".to_string()],
             )
             .mark(
-                Span::new((0, 15), (0, 18)),
+                Span::new((0, 14), (0, 17)),
                 '~',
-                Style::new().blue().green(),
+                Style::new().green(),
                 vec![
                     "القيمة ليست متغيرة".to_string(),
                     "القيمة ليست متغيرة".to_string(),
@@ -810,13 +847,13 @@ mod tests {
                 ],
             )
             .mark(
-                Span::new((0, 5), (0, 10)),
+                Span::new((0, 4), (0, 9)),
                 '-',
                 Style::new().blue().bold(),
                 vec!["القيمة ليست متغيرة".to_string()],
             )
             .mark(
-                Span::new((2, 5), (2, 10)),
+                Span::new((2, 4), (2, 9)),
                 '^',
                 Style::new().yellow().bold(),
                 vec![
@@ -825,7 +862,7 @@ mod tests {
                 ],
             )
             .mark(
-                Span::new((1, 5), (2, 4)),
+                Span::new((1, 4), (2, 3)),
                 '^',
                 Style::new().red().bold(),
                 vec![
@@ -837,25 +874,25 @@ mod tests {
                 ],
             )
             .mark(
-                Span::new((1, 15), (2, 19)),
+                Span::new((1, 15), (2, 18)),
                 '^',
                 Style::new().color(XtermColors::FlushOrange).bold(),
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((0, 13), (2, 13)),
+                Span::new((0, 12), (2, 13)),
                 '^',
                 Style::new().color(XtermColors::PinkFlamingo).bold(),
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((1, 0), (2, 0)),
+                Span::new((1, 0), (2, 1)),
                 '^',
                 Style::new().color(XtermColors::Brown).bold(),
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((0, 11), (1, 4)),
+                Span::new((0, 10), (1, 3)),
                 '^',
                 Style::new().magenta().bold(),
                 vec![
@@ -865,7 +902,7 @@ mod tests {
                 ],
             )
             .mark(
-                Span::new((1, 8), (1, 10)),
+                Span::new((1, 8), (1, 9)),
                 '^',
                 Style::new().color(XtermColors::Bermuda).bold(),
                 vec![
@@ -875,13 +912,13 @@ mod tests {
                 ],
             )
             .mark(
-                Span::new((3, 5), (6, 10)),
+                Span::new((3, 4), (6, 9)),
                 '^',
                 Style::new().color(XtermColors::GreenYellow).bold(),
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((4, 11), (5, 5)),
+                Span::new((4, 10), (5, 5)),
                 '^',
                 Style::new().color(XtermColors::BayLeaf).bold(),
                 vec!["علامة طويلة".to_string()],
@@ -893,33 +930,51 @@ mod tests {
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((7, 0), (9, 4)),
+                Span::new((7, 0), (9, 3)),
                 '^',
                 Style::new().color(XtermColors::Caramel).bold(),
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((7, 5), (9, 9)),
+                Span::new((7, 4), (9, 9)),
                 '^',
                 Style::new().color(XtermColors::CanCanPink).bold(),
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((7, 10), (9, 15)),
+                Span::new((7, 9), (9, 15)),
                 '^',
                 Style::new().color(XtermColors::DarkRose).bold(),
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((7, 12), (9, 19)),
+                Span::new((7, 12), (9, 18)),
                 '^',
                 Style::new().color(XtermColors::Dandelion).bold(),
                 vec!["علامة طويلة".to_string()],
             )
             .mark(
-                Span::new((11, 5), (12, 5)),
+                Span::new((11, 4), (12, 5)),
                 '^',
                 Style::new().color(XtermColors::Dandelion).bold(),
+                vec!["علامة طويلة".to_string()],
+            )
+            .mark(
+                Span::new((14, 4), (20, 5)),
+                '^',
+                Style::new().color(XtermColors::BittersweetOrange).bold(),
+                vec!["علامة طويلة".to_string()],
+            )
+            .mark(
+                Span::new((17, 4), (17, 9)),
+                '^',
+                Style::new().color(XtermColors::CaribbeanGreen).bold(),
+                vec!["علامة طويلة".to_string()],
+            )
+            .mark(
+                Span::new((0, 0), (17, 1)),
+                '^',
+                Style::new().color(XtermColors::BlueStone).bold(),
                 vec!["علامة طويلة".to_string()],
             );
 
