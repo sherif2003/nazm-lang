@@ -1,10 +1,12 @@
 use nazmc_diagnostics::span::SpanCursor;
 
 use crate::{
-    type_infer::TyVarState,
+    ty_infer::{CompositeType, ConcreteType, Type},
     typed_ast::{ArrayType, FieldInfo, LambdaParams},
     *,
 };
+
+use thin_vec::thin_vec;
 
 impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn infer_scope(&mut self, scope_key: ScopeKey) -> Ty {
@@ -61,9 +63,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
             ExprKind::BinaryOp(binary_op_expr) => self.infer_bin_op_expr(&binary_op_expr.clone()), // TODO: Remove the clone
             ExprKind::On => todo!(),
-            ExprKind::Break | ExprKind::Continue => self
-                .s
-                .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key)),
+            ExprKind::Break | ExprKind::Continue => self.s.new_ty_var(),
             ExprKind::Return(return_expr) => self.infer_return_expr(&return_expr.clone()), // TODO: Remove the clone
         };
 
@@ -91,16 +91,18 @@ impl<'a> SemanticsAnalyzer<'a> {
                 NumKind::U4(_) => Ty::u4(),
                 NumKind::U8(_) => Ty::u8(),
                 NumKind::UnspecifiedInt(_) => {
-                    return self.s.new_unspecified_unsigned_int_ty_var(
-                        self.current_file_key,
-                        self.get_expr_span(expr_key),
-                    )
+                    let ty_var = self.s.new_ty_var();
+                    let _ = self
+                        .s
+                        .constrain_type_var(&ty_var, TyInfer::unspecified_int_constraints());
+                    return ty_var;
                 }
                 NumKind::UnspecifiedFloat(_) => {
-                    return self.s.new_unspecified_float_ty_var(
-                        self.current_file_key,
-                        self.get_expr_span(expr_key),
-                    )
+                    let ty_var = self.s.new_ty_var();
+                    let _ = self
+                        .s
+                        .constrain_type_var(&ty_var, TyInfer::unspecified_float_constraints());
+                    return ty_var;
                 }
             },
         }
@@ -122,10 +124,10 @@ impl<'a> SemanticsAnalyzer<'a> {
                 .get(&id)
                 .unwrap(),
             Item::FnParam { idx, fn_key: _ } => {
-                let Type::FnPtr(FnPtrType {
+                let Type::Concrete(ConcreteType::Composite(CompositeType::FnPtr {
                     params_types,
                     return_type: _,
-                }) = &*self.typed_ast.fns_signatures[&self.current_fn_key].borrow()
+                })) = &*self.typed_ast.fns_signatures[&self.current_fn_key].borrow()
                 else {
                     unreachable!()
                 };
@@ -175,32 +177,43 @@ impl<'a> SemanticsAnalyzer<'a> {
         let on_expr_ty = self.s.apply(&on_expr_ty);
 
         let (params_types, return_type, is_fn) = match on_expr_ty.inner() {
-            Type::FnPtr(FnPtrType {
+            Type::Concrete(ConcreteType::Composite(CompositeType::FnPtr {
                 params_types,
                 return_type,
-            }) => (params_types, return_type, true),
-            Type::Lambda(LambdaType {
+            })) => (params_types, return_type, true),
+            Type::Concrete(ConcreteType::Composite(CompositeType::Lambda {
                 params_types,
                 return_type,
-            }) => (params_types, return_type, false),
-            Type::TypeVar(ty_var_key) if !self.s.check_map_to_unspecified_number(ty_var_key) => {
+            })) => (params_types, return_type, false),
+            _ => {
                 let params_types = args
                     .iter()
-                    .map(|expr_key| {
-                        self.s
-                            .new_never_ty_var(self.current_file_key, self.get_expr_span(*expr_key))
-                    })
+                    .map(|expr_key| self.s.new_ty_var())
                     .collect::<ThinVec<_>>();
-                let return_type = self
-                    .s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                let return_type = self.s.new_ty_var();
+
+                if let Err(err) = self.s.constrain_type_var(
+                    &on_expr_ty,
+                    thin_vec![
+                        ConcreteType::Composite(CompositeType::FnPtr {
+                            params_types: params_types.clone(),
+                            return_type: return_type.clone()
+                        }),
+                        ConcreteType::Composite(CompositeType::Lambda {
+                            params_types: params_types.clone(),
+                            return_type: return_type.clone()
+                        }),
+                    ],
+                ) {
+                    self.add_calling_non_callable_err(
+                        &on_expr_ty,
+                        self.get_expr_span(on),
+                        parens_span,
+                    );
+                    return return_type;
+                }
+
                 (params_types, return_type, true)
-            }
-            _ => {
-                self.add_calling_non_callable_err(&on_expr_ty, self.get_expr_span(on), parens_span);
-                return self
-                    .s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
             }
         };
 
@@ -258,21 +271,27 @@ impl<'a> SemanticsAnalyzer<'a> {
         let on_expr_ty = self.s.apply(&on_expr_ty);
 
         let (underlying_ty, is_array) = match on_expr_ty.inner() {
-            Type::Array(ArrayType {
+            Type::Concrete(ConcreteType::Composite(CompositeType::Array {
                 underlying_typ,
                 size: _,
-            }) => (underlying_typ, true),
-            Type::Slice(underlying_ty) => (underlying_ty, false),
-            Type::TypeVar(ty_var_key) if !self.s.check_map_to_unspecified_number(ty_var_key) => (
-                self.s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(on)),
-                true,
-            ),
+            })) => (underlying_typ, true),
+            Type::Concrete(ConcreteType::Composite(CompositeType::Slice(underlying_ty))) => {
+                (underlying_ty, false)
+            }
             _ => {
-                self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
-                return self
-                    .s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+                let underlying_ty = self.s.new_ty_var();
+
+                if let Err(err) = self.s.constrain_type_var(
+                    &on_expr_ty,
+                    // Cannot constraint to array types
+                    thin_vec![ConcreteType::Composite(CompositeType::Slice(
+                        underlying_ty.clone()
+                    ))],
+                ) {
+                    self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
+                }
+
+                return underlying_ty;
             }
         };
 
@@ -288,9 +307,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     fn infer_array_elements(&mut self, elements: &ThinVec<ExprKey>, expr_key: ExprKey) -> Ty {
         if elements.is_empty() {
-            let unknown_ty = self
-                .s
-                .new_unknown_ty_var(self.current_file_key, self.get_expr_span(expr_key));
+            let unknown_ty = self.s.new_ty_var();
             return Ty::array(unknown_ty, 0);
         }
 
@@ -323,25 +340,17 @@ impl<'a> SemanticsAnalyzer<'a> {
         let on_expr_ty = self.s.apply(&on_expr_ty);
 
         match on_expr_ty.inner() {
-            Type::Tuple(TupleType { types }) => {
+            Type::Concrete(ConcreteType::Composite(CompositeType::Tuple { types })) => {
                 if idx < types.len() {
                     types[idx].clone()
                 } else {
                     self.add_out_of_bounds_tuple_idx_err(idx, types.len(), *idx_span);
-                    self.s
-                        .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                    self.s.new_ty_var()
                 }
-            }
-            Type::TypeVar(ty_var_key) if !self.s.check_map_to_unspecified_number(ty_var_key) => {
-                let unknown_ty = self
-                    .s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
-                unknown_ty
             }
             _ => {
                 self.add_indexing_non_tuple_err(&on_expr_ty, on, *idx_span);
-                self.s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                self.s.new_ty_var()
             }
         }
     }
@@ -528,20 +537,12 @@ impl<'a> SemanticsAnalyzer<'a> {
                     ty
                 } else {
                     self.add_unknown_field_in_struct_expr_err(struct_key, name.id, name.span);
-                    self.s
-                        .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                    self.s.new_ty_var()
                 }
-            }
-            Type::TypeVar(ty_var_key) if !self.s.check_map_to_unspecified_number(ty_var_key) => {
-                let unknown_ty = self
-                    .s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key));
-                unknown_ty
             }
             _ => {
                 self.add_type_doesnt_have_fields_err(&on_expr_ty, on, *name);
-                self.s
-                    .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                self.s.new_ty_var()
             }
         }
     }
@@ -589,7 +590,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
         }
 
-        self.s.new_never_ty_var(self.current_file_key, span)
+        self.s.new_ty_var()
     }
 
     fn infer_lambda_expr(&mut self, LambdaExpr { params, body }: &LambdaExpr) -> Ty {
@@ -609,8 +610,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             let binding_ty = if let Some(type_expr_key) = typ {
                 self.analyze_type_expr(*type_expr_key).0
             } else {
-                self.s
-                    .new_unknown_ty_var(self.current_file_key, kind.get_span())
+                self.s.new_ty_var()
             };
 
             self.set_bindnig_ty_for_lambda(lambda_scope_key, &kind, &binding_ty);
@@ -622,9 +622,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let outer_lambda_first_return_ty_span = self.current_lambda_first_implicit_return_ty_span;
         let outer_scope_key = self.current_lambda_scope_key;
 
-        self.current_scope_expected_return_ty = self
-            .s
-            .new_unknown_ty_var(self.current_file_key, curly_braces_span);
+        self.current_scope_expected_return_ty = self.s.new_ty_var();
         self.current_lambda_first_implicit_return_ty_span = None;
         self.current_lambda_scope_key = Some(lambda_scope_key);
 
@@ -681,7 +679,9 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .insert(id.id, ty.clone());
             }
             BindingKind::Tuple(kinds, span) => {
-                if let Type::Tuple(TupleType { types }) = ty.inner() {
+                if let Type::Concrete(ConcreteType::Composite(CompositeType::Tuple { types })) =
+                    ty.inner()
+                {
                     if kinds.len() == types.len() {
                         for i in 0..kinds.len() {
                             let kind = &kinds[i];
@@ -714,9 +714,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let mut tuple_types = ThinVec::with_capacity(kinds.len());
         for i in 0..kinds.len() {
             let kind = &kinds[i];
-            let ty = self
-                .s
-                .new_unknown_ty_var(self.current_file_key, kind.get_span());
+            let ty = self.s.new_ty_var();
             self.set_bindnig_ty_for_lambda(lambda_scope_key, kind, &ty);
             tuple_types.push(ty);
         }
@@ -733,38 +731,14 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         match op {
             UnaryOp::Minus => {
-                let found_ty = self.s.apply(&inner);
-                match found_ty.inner() {
-                    Type::Concrete(
-                        ConcreteType::I
-                        | ConcreteType::I1
-                        | ConcreteType::I2
-                        | ConcreteType::I4
-                        | ConcreteType::I8
-                        | ConcreteType::F4
-                        | ConcreteType::F8,
-                    ) => inner,
-                    Type::TypeVar(ty_var_key) => {
-                        match self.s.all_ty_vars[ty_var_key].0 {
-                            TyVarState::Unknown
-                            | TyVarState::Never
-                            | TyVarState::UnspecifiedNumber => {
-                                self.s.all_ty_vars[ty_var_key].0 =
-                                    TyVarState::UnspecifiedSignedNumber;
-                            }
-                            TyVarState::UnspecifiedUnsignedInt => {
-                                self.s.all_ty_vars[ty_var_key].0 = TyVarState::UnspecifiedSignedInt;
-                            }
-                            TyVarState::UnspecifiedSignedNumber
-                            | TyVarState::UnspecifiedSignedInt
-                            | TyVarState::UnspecifiedFloat => {}
-                        }
-                        inner
-                    }
-                    _ => {
-                        self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, *expr, *op_span);
-                        Ty::i4()
-                    }
+                if let Err(err) = self
+                    .s
+                    .constrain_type_var(&inner, TyInfer::unspecified_signed_number_constraints())
+                {
+                    self.add_type_mismatch_in_op_err(&Ty::i4(), &inner, *expr, *op_span);
+                    Ty::i4()
+                } else {
+                    inner
                 }
             }
             UnaryOp::LNot => {
@@ -781,11 +755,25 @@ impl<'a> SemanticsAnalyzer<'a> {
             UnaryOp::Deref => {
                 let found_ty = self.s.apply(&inner);
                 match found_ty.inner() {
-                    Type::Ptr(inner) | Type::PtrMut(inner) => inner,
+                    Type::Concrete(ConcreteType::Composite(CompositeType::Ptr(underlying_ty)))
+                    | Type::Concrete(ConcreteType::Composite(CompositeType::PtrMut(
+                        underlying_ty,
+                    ))) => underlying_ty,
                     _ => {
-                        self.add_cannot_deref_type(&found_ty, *expr, *op_span);
-                        self.s
-                            .new_never_ty_var(self.current_file_key, self.get_expr_span(expr_key))
+                        let underlying_ty = self.s.new_ty_var();
+
+                        if let Err(err) = self.s.constrain_type_var(
+                            &inner,
+                            thin_vec![
+                                ConcreteType::Composite(CompositeType::Ptr(underlying_ty.clone())),
+                                ConcreteType::Composite(CompositeType::PtrMut(
+                                    underlying_ty.clone()
+                                ))
+                            ],
+                        ) {
+                            self.add_cannot_deref_type(&found_ty, *expr, *op_span);
+                        }
+                        underlying_ty
                     }
                 }
             }
@@ -933,67 +921,26 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     fn unify_with_int_num(&mut self, found_ty: &Ty, expr_key: ExprKey, op_span: &Span) -> bool {
-        let found_ty = self.s.apply(found_ty);
-
-        match found_ty.inner() {
-            Type::Concrete(
-                ConcreteType::I
-                | ConcreteType::I1
-                | ConcreteType::I2
-                | ConcreteType::I4
-                | ConcreteType::I8
-                | ConcreteType::U
-                | ConcreteType::U1
-                | ConcreteType::U2
-                | ConcreteType::U4
-                | ConcreteType::U8,
-            ) => true,
-            Type::TypeVar(ty_var_key) => match self.s.all_ty_vars[ty_var_key].0 {
-                TyVarState::UnspecifiedNumber | TyVarState::Never | TyVarState::Unknown => {
-                    self.s.all_ty_vars[ty_var_key].0 = TyVarState::UnspecifiedUnsignedInt;
-                    true
-                }
-                TyVarState::UnspecifiedSignedNumber => {
-                    self.s.all_ty_vars[ty_var_key].0 = TyVarState::UnspecifiedSignedInt;
-                    true
-                }
-                TyVarState::UnspecifiedUnsignedInt | TyVarState::UnspecifiedSignedInt => true,
-                TyVarState::UnspecifiedFloat => false,
-            },
-            _ => {
-                self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, expr_key, *op_span);
-                false
-            }
+        if let Err(err) = self
+            .s
+            .constrain_type_var(&found_ty, TyInfer::unspecified_int_constraints())
+        {
+            self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, expr_key, *op_span);
+            false
+        } else {
+            true
         }
     }
 
     fn unify_with_num(&mut self, found_ty: &Ty, expr_key: ExprKey, op_span: &Span) -> bool {
-        let found_ty = self.s.apply(found_ty);
-
-        match found_ty.inner() {
-            Type::Concrete(
-                ConcreteType::I
-                | ConcreteType::I1
-                | ConcreteType::I2
-                | ConcreteType::I4
-                | ConcreteType::I8
-                | ConcreteType::U
-                | ConcreteType::U1
-                | ConcreteType::U2
-                | ConcreteType::U4
-                | ConcreteType::U8
-                | ConcreteType::F4
-                | ConcreteType::F8,
-            ) => true,
-            Type::TypeVar(ty_var_key) if self.s.check_map_to_unspecified_number(ty_var_key) => true,
-            Type::TypeVar(ty_var_key) => {
-                self.s.all_ty_vars[ty_var_key].0 = TyVarState::UnspecifiedNumber;
-                true
-            }
-            _ => {
-                self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, expr_key, *op_span);
-                false
-            }
+        if let Err(err) = self
+            .s
+            .constrain_type_var(&found_ty, TyInfer::unspecified_number_constraints())
+        {
+            self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, expr_key, *op_span);
+            false
+        } else {
+            true
         }
     }
 

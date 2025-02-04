@@ -1,8 +1,9 @@
-use std::vec;
+use std::{fmt::format, vec};
 
-use nazmc_diagnostics::span::{self, SpanCursor};
-
-use crate::{type_infer::TyVarState, *};
+use crate::{
+    ty_infer::{CompositeType, ConcreteType, PrimitiveType, Type},
+    *,
+};
 
 impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn fmt_pkg_name(&self, pkg_key: PkgKey) -> String {
@@ -24,92 +25,19 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     pub(crate) fn fmt_ty(&self, ty: &Ty) -> String {
+        let ty = self.s.apply(ty);
         match ty.inner() {
-            Type::TypeVar(ty_var_key) => {
-                let new_ty = &self.s.apply(ty);
-                if new_ty == ty {
-                    // format!("_{}", usize::from(ty_var_key))
-                    self.fmt_ty_var_state_ty(self.s.all_ty_vars[ty_var_key].0)
-                } else {
-                    self.fmt_ty(new_ty)
-                }
-            }
-            Type::Slice(rc_cell) => format!("[{}]", self.fmt_ty(&rc_cell)),
-            Type::Ptr(rc_cell) => format!("*{}", self.fmt_ty(&rc_cell)),
-            Type::Ref(rc_cell) => format!("#{}", self.fmt_ty(&rc_cell)),
-            Type::PtrMut(rc_cell) => format!("*متغير {}", self.fmt_ty(&rc_cell)),
-            Type::RefMut(rc_cell) => format!("#متغير {}", self.fmt_ty(&rc_cell)),
-            Type::Array(array_type) => format!(
-                "[{}؛ {}]",
-                self.fmt_ty(&array_type.underlying_typ),
-                array_type.size
-            ),
-            Type::Tuple(tuple_type) => {
-                format!(
-                    "({})",
-                    tuple_type
-                        .types
-                        .iter()
-                        .map(|ty| self.fmt_ty(&ty))
-                        .collect::<Vec<_>>()
-                        .join("، ")
-                )
-            }
-            Type::Lambda(lambda_type) => format!(
-                "({}) -> {}",
-                lambda_type
-                    .params_types
-                    .iter()
-                    .map(|param_ty| self.fmt_ty(&param_ty))
-                    .collect::<Vec<_>>()
-                    .join("، "),
-                self.fmt_ty(&lambda_type.return_type)
-            ),
-            Type::FnPtr(fn_ptr_type) => format!(
-                "دالة({}) -> {}",
-                fn_ptr_type
-                    .params_types
-                    .iter()
-                    .map(|param_ty| self.fmt_ty(&param_ty))
-                    .collect::<Vec<_>>()
-                    .join("، "),
-                self.fmt_ty(&fn_ptr_type.return_type)
-            ),
+            Type::TyVar(ty_var_key) => match &self.s.ty_vars[ty_var_key] {
+                ty_infer::TyVarSubstitution::Any => format!("_"),
+                ty_infer::TyVarSubstitution::AnyOf(allowed) => self.fmt_con_ty(&allowed[0]),
+                ty_infer::TyVarSubstitution::Determined(determined) => self.fmt_ty(determined),
+            },
             Type::Concrete(con_ty) => self.fmt_con_ty(&con_ty),
-        }
-    }
-
-    pub(crate) fn fmt_ty_var_state_ty(&self, ty_var_state: TyVarState) -> String {
-        match ty_var_state {
-            TyVarState::Unknown => format!("_"),
-            TyVarState::Never => format!("!!"),
-            TyVarState::UnspecifiedNumber => format!("{{عدد}}"),
-            TyVarState::UnspecifiedSignedNumber => format!("{{عدد}}"),
-            TyVarState::UnspecifiedUnsignedInt => format!("{{عدد}}"),
-            TyVarState::UnspecifiedSignedInt => format!("{{عدد صحيح}}"),
-            TyVarState::UnspecifiedFloat => format!("{{عدد عشري}}"),
         }
     }
 
     pub(crate) fn fmt_con_ty(&self, con_ty: &ConcreteType) -> String {
         match con_ty {
-            ConcreteType::Never => format!("!!"),
-            ConcreteType::Unit => format!("()"),
-            ConcreteType::I => format!("ص"),
-            ConcreteType::I1 => format!("ص1"),
-            ConcreteType::I2 => format!("ص2"),
-            ConcreteType::I4 => format!("ص4"),
-            ConcreteType::I8 => format!("ص8"),
-            ConcreteType::U => format!("ط"),
-            ConcreteType::U1 => format!("ط1"),
-            ConcreteType::U2 => format!("ط2"),
-            ConcreteType::U4 => format!("ط4"),
-            ConcreteType::U8 => format!("ط8"),
-            ConcreteType::F4 => format!("ع4"),
-            ConcreteType::F8 => format!("ع8"),
-            ConcreteType::Bool => format!("شرط"),
-            ConcreteType::Char => format!("حرف"),
-            ConcreteType::Str => format!("متن"),
             ConcreteType::UnitStruct(unit_struct_key) => {
                 let item_info = self.ast.unit_structs[*unit_struct_key].info;
                 self.fmt_item_name(item_info)
@@ -122,6 +50,76 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let item_info = self.ast.fields_structs[*fields_struct_key].info;
                 self.fmt_item_name(item_info)
             }
+            ConcreteType::Composite(comp_ty) => self.fmt_comp_ty(comp_ty),
+            ConcreteType::Primitive(prim_ty) => self.fmt_prim_ty(prim_ty),
+        }
+    }
+
+    pub(crate) fn fmt_comp_ty(&self, comp_ty: &CompositeType) -> String {
+        match comp_ty {
+            CompositeType::Slice(inner) => format!("[{}]", self.fmt_ty(&inner)),
+            CompositeType::Ptr(inner) => format!("*{}", self.fmt_ty(&inner)),
+            CompositeType::Ref(inner) => format!("#{}", self.fmt_ty(&inner)),
+            CompositeType::PtrMut(inner) => format!("*متغير {}", self.fmt_ty(&inner)),
+            CompositeType::RefMut(inner) => format!("#متغير {}", self.fmt_ty(&inner)),
+            CompositeType::Array {
+                underlying_typ,
+                size,
+            } => format!("[{}؛ {}]", self.fmt_ty(&underlying_typ), size),
+            CompositeType::Tuple { types } => format!(
+                "({})",
+                types
+                    .iter()
+                    .map(|ty| self.fmt_ty(&ty))
+                    .collect::<Vec<_>>()
+                    .join("، ")
+            ),
+            CompositeType::Lambda {
+                params_types,
+                return_type,
+            } => format!(
+                "({}) -> {}",
+                params_types
+                    .iter()
+                    .map(|param_ty| self.fmt_ty(&param_ty))
+                    .collect::<Vec<_>>()
+                    .join("، "),
+                self.fmt_ty(&return_type)
+            ),
+            CompositeType::FnPtr {
+                params_types,
+                return_type,
+            } => format!(
+                "دالة({}) -> {}",
+                params_types
+                    .iter()
+                    .map(|param_ty| self.fmt_ty(&param_ty))
+                    .collect::<Vec<_>>()
+                    .join("، "),
+                self.fmt_ty(&return_type)
+            ),
+        }
+    }
+
+    pub(crate) fn fmt_prim_ty(&self, prim_ty: &PrimitiveType) -> String {
+        match prim_ty {
+            PrimitiveType::Never => format!("!!"),
+            PrimitiveType::Unit => format!("()"),
+            PrimitiveType::I => format!("ص"),
+            PrimitiveType::I1 => format!("ص1"),
+            PrimitiveType::I2 => format!("ص2"),
+            PrimitiveType::I4 => format!("ص4"),
+            PrimitiveType::I8 => format!("ص8"),
+            PrimitiveType::U => format!("ط"),
+            PrimitiveType::U1 => format!("ط1"),
+            PrimitiveType::U2 => format!("ط2"),
+            PrimitiveType::U4 => format!("ط4"),
+            PrimitiveType::U8 => format!("ط8"),
+            PrimitiveType::F4 => format!("ع4"),
+            PrimitiveType::F8 => format!("ع8"),
+            PrimitiveType::Bool => format!("شرط"),
+            PrimitiveType::Char => format!("حرف"),
+            PrimitiveType::Str => format!("متن"),
         }
     }
 

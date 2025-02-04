@@ -2,7 +2,6 @@ mod consts;
 mod errors;
 mod exprs;
 mod ty_infer;
-mod type_infer;
 mod typed_ast;
 mod types;
 
@@ -15,10 +14,8 @@ use nazmc_diagnostics::{
 };
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
-use type_infer::Substitution;
-use typed_ast::{
-    ConcreteType, FnPtrType, LambdaType, LetStm, TupleType, Ty, Type, TypeVarKey, TypedAST,
-};
+use ty_infer::{CompositeType, ConcreteType, Ty, TyInfer, Type};
+use typed_ast::{FnPtrType, LambdaType, LetStm, TupleType, TypedAST};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum CycleDetected {
@@ -50,7 +47,7 @@ pub struct SemanticsAnalyzer<'a> {
     cycle_stack: Vec<Diagnostic<'a>>,
     current_file_key: FileKey,
     current_fn_key: FnKey,
-    s: Substitution,
+    s: TyInfer,
     /// For fns and lambdas only
     current_scope_expected_return_ty: Ty,
     current_lambda_first_implicit_return_ty_span: Option<Span>,
@@ -109,8 +106,12 @@ impl<'a> SemanticsAnalyzer<'a> {
             self.current_fn_key = fn_key;
 
             self.current_scope_expected_return_ty =
-                if let Type::FnPtr(fn_ptr) = &*self.typed_ast.fns_signatures[&fn_key].borrow() {
-                    fn_ptr.return_type.clone()
+                if let Type::Concrete(ConcreteType::Composite(CompositeType::FnPtr {
+                    params_types: _,
+                    return_type,
+                })) = &*self.typed_ast.fns_signatures[&fn_key].borrow()
+                {
+                    return_type.clone()
                 } else {
                     unreachable!()
                 };
@@ -133,18 +134,6 @@ impl<'a> SemanticsAnalyzer<'a> {
                     span,
                 );
             }
-        }
-
-        let unknown_vars = self.s.collect();
-
-        for (ty_var_key, _) in unknown_vars {
-            let (ty_state, file_key, span) = self.s.all_ty_vars[ty_var_key];
-
-            let mut code_window = CodeWindow::new(&self.files_infos[file_key], span.start);
-            code_window.mark_error(span, vec!["لا يمكن تحديد النوع هنا ضمنياً".into()]);
-            let diagnostic =
-                Diagnostic::error("يجب تحديد النوع بشكل خارجي".into(), vec![code_window]);
-            self.diagnostics.push(diagnostic);
         }
 
         println!("Exprs types:");
@@ -199,10 +188,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                         if let Some(type_expr_key) = self.ast.lets[*let_stm_key].binding.typ {
                             self.analyze_type_expr(type_expr_key).0
                         } else {
-                            self.s.new_unknown_ty_var(
-                                self.current_file_key,
-                                self.ast.lets[*let_stm_key].binding.kind.get_span(),
-                            )
+                            self.s.new_ty_var()
                         };
 
                     if let Some(expr_key) = self.ast.lets[*let_stm_key].assign {
@@ -292,7 +278,9 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .insert(id.id, ty.clone());
             }
             BindingKind::Tuple(kinds, span) => {
-                if let Type::Tuple(TupleType { types }) = ty.inner() {
+                if let Type::Concrete(ConcreteType::Composite(CompositeType::Tuple { types })) =
+                    ty.inner()
+                {
                     if kinds.len() == types.len() {
                         for i in 0..kinds.len() {
                             let kind = &kinds[i];
@@ -322,9 +310,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let mut tuple_types = ThinVec::with_capacity(kinds.len());
         for i in 0..kinds.len() {
             let kind = &kinds[i];
-            let ty = self
-                .s
-                .new_unknown_ty_var(self.current_file_key, kind.get_span());
+            let ty = self.s.new_ty_var();
             self.set_bindnig_ty(let_stm_key, kind, &ty);
             tuple_types.push(ty);
         }
