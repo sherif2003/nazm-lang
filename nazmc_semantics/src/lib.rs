@@ -1,6 +1,7 @@
 mod consts;
 mod errors;
 mod exprs;
+mod ty_infer;
 mod type_infer;
 mod typed_ast;
 mod types;
