@@ -23,6 +23,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     ) {
         match applied_ty.borrow() {
             Type::TyVar(key) => match &self.s.ty_vars[*key] {
+                ty_infer::TyVarSubstitution::Never => {}
                 ty_infer::TyVarSubstitution::Any => {
                     if let Some(&err_msg_idx) = self.unknown_ty_vars.get(key) {
                         if self.unknown_type_errors[err_msg_idx].2.is_none() && is_expr {

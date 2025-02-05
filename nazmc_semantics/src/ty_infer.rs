@@ -326,6 +326,7 @@ impl Default for Ty {
 pub enum TyVarSubstitution {
     #[default]
     Any,
+    Never,
     AnyOf(ThinVec<ConcreteType>),
     Determined(Ty),
 }
@@ -341,6 +342,11 @@ impl TyInfer {
         Ty::type_var(ty_var_key)
     }
 
+    pub(crate) fn new_never_ty_var(&mut self) -> Ty {
+        let ty_var_key = self.ty_vars.push_and_get_key(TyVarSubstitution::Never);
+        Ty::type_var(ty_var_key)
+    }
+
     pub(crate) fn apply(&self, ty: &Ty) -> Ty {
         match &*ty.borrow() {
             Type::Concrete(concrete_type) => Ty::concrete(self.apply_on_concrete(concrete_type)),
@@ -351,7 +357,9 @@ impl TyInfer {
 
                 match substitution {
                     TyVarSubstitution::Determined(rc_cell) => self.apply(&rc_cell),
-                    TyVarSubstitution::Any | TyVarSubstitution::AnyOf(_) => ty.clone(),
+                    TyVarSubstitution::Any
+                    | TyVarSubstitution::Never
+                    | TyVarSubstitution::AnyOf(_) => ty.clone(),
                 }
             }
         }
@@ -445,18 +453,27 @@ impl TyInfer {
                 let sub1 = self.ty_vars[key1].clone();
                 let sub2 = self.ty_vars[key2].clone();
                 match (sub1, sub2) {
-                    (TyVarSubstitution::Any, TyVarSubstitution::Any) => {
+                    (
+                        TyVarSubstitution::Any | TyVarSubstitution::Never,
+                        TyVarSubstitution::Any | TyVarSubstitution::Never,
+                    ) => {
                         // Arbitrarily link key1 to key2.
                         self.ty_vars[key1] = TyVarSubstitution::Determined(Ty::type_var(key2));
                         Ok(())
                     }
-                    (TyVarSubstitution::Any, TyVarSubstitution::AnyOf(_)) => {
+                    (
+                        TyVarSubstitution::Any | TyVarSubstitution::Never,
+                        TyVarSubstitution::AnyOf(_),
+                    ) => {
                         // key1 is unconstrained; adopt the constraints from key2.
                         self.ty_vars[key1] = TyVarSubstitution::Determined(Ty::type_var(key2));
                         // Optionally, key2 retains its AnyOf constraint.
                         Ok(())
                     }
-                    (TyVarSubstitution::AnyOf(_), TyVarSubstitution::Any) => {
+                    (
+                        TyVarSubstitution::AnyOf(_),
+                        TyVarSubstitution::Any | TyVarSubstitution::Never,
+                    ) => {
                         // Symmetric case.
                         self.ty_vars[key2] = TyVarSubstitution::Determined(Ty::type_var(key1));
                         Ok(())
@@ -502,7 +519,7 @@ impl TyInfer {
                 let substiution = std::mem::take(&mut self.ty_vars[key]);
 
                 match substiution {
-                    TyVarSubstitution::Any => {
+                    TyVarSubstitution::Any | TyVarSubstitution::Never => {
                         // No constraints; simply substitute.
                         self.ty_vars[key] =
                             TyVarSubstitution::Determined(Ty::concrete(concrete_type.clone()));
@@ -625,7 +642,7 @@ impl TyInfer {
 
                 match substitution {
                     // If unconstrained, just set the allowed set.
-                    TyVarSubstitution::Any => {
+                    TyVarSubstitution::Any | TyVarSubstitution::Never => {
                         self.ty_vars[*key] = TyVarSubstitution::AnyOf(allowed);
                         Ok(())
                     }

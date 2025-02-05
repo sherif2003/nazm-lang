@@ -2,7 +2,7 @@ use nazmc_diagnostics::span::SpanCursor;
 
 use crate::{
     ty_infer::{CompositeType, ConcreteType, Type},
-    typed_ast::{ArrayType, FieldInfo, LambdaParams},
+    typed_ast::{FieldInfo, LambdaParams},
     *,
 };
 
@@ -22,7 +22,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn infer(&mut self, expr_key: ExprKey) -> Ty {
         let ty = match &self.ast.exprs[expr_key].kind {
             ExprKind::Unit => Ty::unit(),
-            ExprKind::Literal(lit_expr) => self.infer_lit_expr(*lit_expr, expr_key),
+            ExprKind::Literal(lit_expr) => self.infer_lit_expr(*lit_expr),
             ExprKind::PathNoPkg(path_no_pkg_key) => self.infer_path_no_pkg_expr(*path_no_pkg_key),
             ExprKind::PathInPkg(path_with_pkg_key) => {
                 self.infer_path_with_pkg_expr(*path_with_pkg_key)
@@ -38,13 +38,13 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .map(|expr_key| self.infer(expr_key));
                 Ty::tuple(types)
             }
-            ExprKind::Call(call_expr) => self.infer_call_expr(&call_expr.clone(), expr_key), // TODO: Remove the clone
-            ExprKind::Idx(idx_expr) => self.infer_idx_expr(&idx_expr.clone(), expr_key), // TODO: Remove the clone
+            ExprKind::Call(call_expr) => self.infer_call_expr(&call_expr.clone()), // TODO: Remove the clone
+            ExprKind::Idx(idx_expr) => self.infer_idx_expr(&idx_expr.clone()), // TODO: Remove the clone
             ExprKind::ArrayElemnts(elements) => {
-                self.infer_array_elements(&elements.clone(), expr_key) // TODO: Remove the clone
+                self.infer_array_elements(&elements.clone()) // TODO: Remove the clone
             }
             ExprKind::TupleIdx(tuple_idx_expr) => {
-                self.infer_tuple_idx_expr(&tuple_idx_expr.clone(), expr_key) // TODO: Remove the clone
+                self.infer_tuple_idx_expr(&tuple_idx_expr.clone()) // TODO: Remove the clone
             }
             ExprKind::FieldsStruct(fields_struct_expr) => {
                 // TODO: Remove the clone
@@ -52,18 +52,31 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
             ExprKind::If(if_expr) => self.infer_if_expr(&if_expr.clone()), // TODO: Remove the clone
             ExprKind::Field(field_expr) => {
-                self.infer_field_expr(&field_expr.clone(), expr_key) // TODO: Remove the clone
+                self.infer_field_expr(&field_expr.clone()) // TODO: Remove the clone
             }
             ExprKind::Lambda(lambda_expr) => self.infer_lambda_expr(&lambda_expr.clone()), // TODO: Remove the clone
-            ExprKind::TupleStruct(tuple_struct_expr) => todo!(),
-            ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
+            ExprKind::TupleStruct(_) => todo!(),
+            ExprKind::ArrayElemntsSized(_) => todo!(),
             ExprKind::UnaryOp(unary_op_expr) => {
                 // TODO: Remove the clone
-                self.infer_unary_op_expr(&unary_op_expr.clone(), expr_key)
+                self.infer_unary_op_expr(&unary_op_expr.clone())
             }
             ExprKind::BinaryOp(binary_op_expr) => self.infer_bin_op_expr(&binary_op_expr.clone()), // TODO: Remove the clone
             ExprKind::On => todo!(),
-            ExprKind::Break | ExprKind::Continue => self.s.new_ty_var(),
+            ExprKind::Break | ExprKind::Continue => {
+                if !self.is_inside_loop {
+                    let span = self.get_expr_span(expr_key);
+                    let mut code_window =
+                        CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
+                    code_window.mark_error(span, vec![]);
+                    let diagnostic = Diagnostic::error(
+                        "لا يمكن استخدام `قطع` أو `وصل` إلا من داخل حلقة تكرارية".into(),
+                        vec![code_window],
+                    );
+                    self.diagnostics.push(diagnostic);
+                }
+                self.s.new_never_ty_var()
+            }
             ExprKind::Return(return_expr) => self.infer_return_expr(&return_expr.clone()), // TODO: Remove the clone
         };
 
@@ -72,7 +85,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         ty
     }
 
-    fn infer_lit_expr(&mut self, lit_expr: LiteralExpr, expr_key: ExprKey) -> Ty {
+    fn infer_lit_expr(&mut self, lit_expr: LiteralExpr) -> Ty {
         match lit_expr {
             LiteralExpr::Str(_) => Ty::reference(Ty::string()),
             LiteralExpr::Char(_) => Ty::character(),
@@ -112,9 +125,9 @@ impl<'a> SemanticsAnalyzer<'a> {
         let item = self.ast.state.paths_no_pkgs_exprs[path_no_pkg_key];
 
         let typ = match item {
-            Item::Const { vis, key } => todo!(),
-            Item::Static { vis, key } => todo!(),
-            Item::Fn { vis, key } => &self.typed_ast.fns_signatures[&key],
+            Item::Const { vis: _, key } => todo!(),
+            Item::Static { vis: _, key } => todo!(),
+            Item::Fn { vis: _, key } => &self.typed_ast.fns_signatures[&key],
             Item::LocalVar { id, key } => self
                 .typed_ast
                 .lets
@@ -152,9 +165,9 @@ impl<'a> SemanticsAnalyzer<'a> {
         let item = self.ast.state.paths_with_pkgs_exprs[path_with_pkg_key];
 
         let typ: &Ty = match item {
-            Item::Const { vis, key } => todo!(),
-            Item::Static { vis, key } => todo!(),
-            Item::Fn { vis, key } => &self.typed_ast.fns_signatures[&key],
+            Item::Const { vis: _, key } => todo!(),
+            Item::Static { vis: _, key } => todo!(),
+            Item::Fn { vis: _, key } => &self.typed_ast.fns_signatures[&key],
             _ => unreachable!(),
         };
 
@@ -168,7 +181,6 @@ impl<'a> SemanticsAnalyzer<'a> {
             args,
             parens_span,
         }: &CallExpr,
-        expr_key: ExprKey,
     ) -> Ty {
         let on = *on;
         let parens_span = *parens_span;
@@ -210,7 +222,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                         self.get_expr_span(on),
                         parens_span,
                     );
-                    return return_type;
+                    return self.s.new_never_ty_var();
                 }
 
                 (params_types, return_type, true)
@@ -262,7 +274,6 @@ impl<'a> SemanticsAnalyzer<'a> {
             idx,
             brackets_span,
         }: &IdxExpr,
-        expr_key: ExprKey,
     ) -> Ty {
         let on = *on;
         let brackets_span = *brackets_span;
@@ -289,6 +300,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     ))],
                 ) {
                     self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
+                    return self.s.new_never_ty_var();
                 }
 
                 return underlying_ty;
@@ -305,7 +317,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         underlying_ty
     }
 
-    fn infer_array_elements(&mut self, elements: &ThinVec<ExprKey>, expr_key: ExprKey) -> Ty {
+    fn infer_array_elements(&mut self, elements: &ThinVec<ExprKey>) -> Ty {
         if elements.is_empty() {
             let unknown_ty = self.s.new_ty_var();
             return Ty::array(unknown_ty, 0);
@@ -328,11 +340,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         Ty::array(first_ty, elements.len() as u32)
     }
 
-    fn infer_tuple_idx_expr(
-        &mut self,
-        TupleIdxExpr { on, idx, idx_span }: &TupleIdxExpr,
-        expr_key: ExprKey,
-    ) -> Ty {
+    fn infer_tuple_idx_expr(&mut self, TupleIdxExpr { on, idx, idx_span }: &TupleIdxExpr) -> Ty {
         let on = *on;
         let idx = *idx;
 
@@ -345,12 +353,12 @@ impl<'a> SemanticsAnalyzer<'a> {
                     types[idx].clone()
                 } else {
                     self.add_out_of_bounds_tuple_idx_err(idx, types.len(), *idx_span);
-                    self.s.new_ty_var()
+                    self.s.new_never_ty_var()
                 }
             }
             _ => {
                 self.add_indexing_non_tuple_err(&on_expr_ty, on, *idx_span);
-                self.s.new_ty_var()
+                self.s.new_never_ty_var()
             }
         }
     }
@@ -516,7 +524,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         if_ty
     }
 
-    fn infer_field_expr(&mut self, FieldExpr { on, name }: &FieldExpr, expr_key: ExprKey) -> Ty {
+    fn infer_field_expr(&mut self, FieldExpr { on, name }: &FieldExpr) -> Ty {
         let on = *on;
 
         let on_expr_ty = self.infer(on);
@@ -537,12 +545,12 @@ impl<'a> SemanticsAnalyzer<'a> {
                     ty
                 } else {
                     self.add_unknown_field_in_struct_expr_err(struct_key, name.id, name.span);
-                    self.s.new_ty_var()
+                    self.s.new_never_ty_var()
                 }
             }
             _ => {
                 self.add_type_doesnt_have_fields_err(&on_expr_ty, on, *name);
-                self.s.new_ty_var()
+                self.s.new_never_ty_var()
             }
         }
     }
@@ -590,7 +598,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
         }
 
-        self.s.new_ty_var()
+        self.s.new_never_ty_var()
     }
 
     fn infer_lambda_expr(&mut self, LambdaExpr { params, body }: &LambdaExpr) -> Ty {
@@ -722,11 +730,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         Ty::tuple(tuple_types)
     }
 
-    fn infer_unary_op_expr(
-        &mut self,
-        UnaryOpExpr { op, op_span, expr }: &UnaryOpExpr,
-        expr_key: ExprKey,
-    ) -> Ty {
+    fn infer_unary_op_expr(&mut self, UnaryOpExpr { op, op_span, expr }: &UnaryOpExpr) -> Ty {
         let inner = self.infer(*expr);
 
         match op {
