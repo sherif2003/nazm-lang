@@ -201,7 +201,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             ExprKind::Lambda(lambda_expr) => {
                 let Type::Concrete(ConcreteType::Composite(CompositeType::Lambda {
                     params_types,
-                    return_type: _,
+                    return_type,
                 })) = self.typed_ast.exprs[&expr_key].inner()
                 else {
                     unreachable!()
@@ -216,7 +216,21 @@ impl<'a> SemanticsAnalyzer<'a> {
                     }
                 }
 
+                self.ty_var_check(&return_type, self.get_expr_span(expr_key), false);
+
                 self.check_scope_ty_vars(lambda_expr.body);
+
+                // Early return as it will recheck the lambda params types and will set is_expr to true
+                // Which will make the second span of the unknown type error message
+                // will make it larger than the first span
+
+                let ty = &self.typed_ast.exprs[&expr_key].clone();
+
+                let ty = self.s.apply(ty);
+
+                self.typed_ast.exprs.insert(expr_key, ty.clone());
+
+                return;
             }
             ExprKind::UnaryOp(unary_op_expr) => {
                 self.check_expr_ty_vars(unary_op_expr.expr);
