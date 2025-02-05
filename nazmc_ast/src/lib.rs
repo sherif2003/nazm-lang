@@ -293,7 +293,6 @@ pub enum ScopeEvent {
 pub enum Stm {
     Let(LetStmKey),
     While(Box<WhileStm>),
-    If(Box<IfExpr>),
     Expr(ExprKey),
 }
 

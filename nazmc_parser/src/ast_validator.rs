@@ -809,7 +809,12 @@ impl<'a> ASTValidator<'a> {
                         scope_key,
                     }))
                 }
-                Stm::If(if_expr) => nazmc_ast::Stm::If(Box::new(self.lower_if_expr(if_expr))),
+                Stm::If(if_expr) => {
+                    let span = get_if_expr_span(&if_expr);
+                    let if_expr = Box::new(self.lower_if_expr(if_expr));
+                    let expr = self.new_expr(span, nazmc_ast::ExprKind::If(if_expr));
+                    nazmc_ast::Stm::Expr(expr)
+                }
                 Stm::When(_when_expr) => todo!(),
                 Stm::Expr(stm) => nazmc_ast::Stm::Expr(self.lower_expr(stm.expr)),
             };
@@ -1165,41 +1170,7 @@ impl<'a> ASTValidator<'a> {
             AtomicExpr::Lambda(lambda_expr) => self.lower_lambda_expr(lambda_expr),
             AtomicExpr::When(when_expr) => self.lower_when_expr(when_expr),
             AtomicExpr::If(if_expr) => {
-                let span_end = if let Some(ref else_) = if_expr.else_cluase {
-                    &else_
-                        .block
-                        .as_ref()
-                        .unwrap()
-                        .close_curly
-                        .as_ref()
-                        .unwrap()
-                        .span
-                } else if !if_expr.else_ifs.is_empty() {
-                    &if_expr
-                        .else_ifs
-                        .last()
-                        .unwrap()
-                        .conditional_block
-                        .block
-                        .as_ref()
-                        .unwrap()
-                        .close_curly
-                        .as_ref()
-                        .unwrap()
-                        .span
-                } else {
-                    &if_expr
-                        .conditional_block
-                        .block
-                        .as_ref()
-                        .unwrap()
-                        .close_curly
-                        .as_ref()
-                        .unwrap()
-                        .span
-                };
-
-                let span = if_expr.if_keyword.span.merged_with(span_end);
+                let span = get_if_expr_span(&if_expr);
 
                 let kind = nazmc_ast::ExprKind::If(Box::new(self.lower_if_expr(if_expr)));
 
@@ -1825,4 +1796,42 @@ fn occurrences_code_window<'a>(
     }
 
     code_window
+}
+
+fn get_if_expr_span(if_expr: &IfExpr) -> Span {
+    let span_end = if let Some(ref else_) = if_expr.else_cluase {
+        &else_
+            .block
+            .as_ref()
+            .unwrap()
+            .close_curly
+            .as_ref()
+            .unwrap()
+            .span
+    } else if !if_expr.else_ifs.is_empty() {
+        &if_expr
+            .else_ifs
+            .last()
+            .unwrap()
+            .conditional_block
+            .block
+            .as_ref()
+            .unwrap()
+            .close_curly
+            .as_ref()
+            .unwrap()
+            .span
+    } else {
+        &if_expr
+            .conditional_block
+            .block
+            .as_ref()
+            .unwrap()
+            .close_curly
+            .as_ref()
+            .unwrap()
+            .span
+    };
+
+    if_expr.if_keyword.span.merged_with(span_end)
 }

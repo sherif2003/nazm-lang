@@ -66,8 +66,10 @@ pub struct FieldInfo {
     pub typ: Ty,
 }
 
+#[derive(Debug, Default, Clone)]
 pub struct LetStm {
     pub bindings: HashMap<IdKey, Ty>,
+    pub ty: Ty,
 }
 
 pub struct LambdaParams {

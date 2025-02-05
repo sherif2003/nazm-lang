@@ -214,7 +214,9 @@ impl<'a> Display for CodeWindow<'a> {
                     }
                     // Copying the next connections
                     if let Some(connection_line) = next_connect_line_opt {
-                        let _ = write!(f, "{}", " ".repeat(max_margin - connection_line.len()));
+                        if let Some(len) = max_margin.checked_sub(connection_line.len()) {
+                            let _ = write!(f, "{}", " ".repeat(len));
+                        }
                         for c in connection_line.iter().rev() {
                             let _ = write!(
                                 f,

@@ -2,6 +2,7 @@ mod consts;
 mod errors;
 mod exprs;
 mod ty_infer;
+mod ty_var_check;
 mod typed_ast;
 mod types;
 
@@ -14,8 +15,8 @@ use nazmc_diagnostics::{
 };
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
-use ty_infer::{CompositeType, ConcreteType, Ty, TyInfer, Type};
-use typed_ast::{FnPtrType, LambdaType, LetStm, TupleType, TypedAST};
+use ty_infer::{CompositeType, ConcreteType, Ty, TyInfer, Type, TypeVarKey};
+use typed_ast::{LetStm, TypedAST};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum CycleDetected {
@@ -52,6 +53,12 @@ pub struct SemanticsAnalyzer<'a> {
     current_scope_expected_return_ty: Ty,
     current_lambda_first_implicit_return_ty_span: Option<Span>,
     current_lambda_scope_key: Option<ScopeKey>,
+    /// Map unkown type varialbes to its error message,
+    /// where multiple type variable could share the same unknown type
+    unknown_ty_vars: HashMap<TypeVarKey, usize>,
+    /// The error messages of unknown types,
+    /// it will have a span and an optional span where that type is first used
+    unknown_type_errors: ThinVec<(Ty, Span, Option<Span>)>,
 }
 
 impl<'a> SemanticsAnalyzer<'a> {
@@ -134,6 +141,30 @@ impl<'a> SemanticsAnalyzer<'a> {
                     span,
                 );
             }
+
+            self.check_scope_ty_vars(_fn.scope_key);
+
+            for (unknown_ty, span, first_used_span) in &self.unknown_type_errors {
+                println!("Span: {:?}", span);
+                let mut code_window =
+                    CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
+
+                if let Some(span) = first_used_span {
+                    code_window.mark_secondary(*span, vec!["يجب معرفة النوع هنا".into()]);
+                }
+
+                code_window.mark_error(*span, vec!["لا يمكن تحديد النوع هنا ضمنياً".into()]);
+
+                let diagnostic = Diagnostic::error(
+                    format!("يجب تحديد النوع `{}` بشكل خارجي", self.fmt_ty(unknown_ty)),
+                    vec![code_window],
+                );
+                self.diagnostics.push(diagnostic);
+            }
+
+            self.unknown_ty_vars.clear();
+            self.unknown_type_errors.clear();
+            // self.s.ty_vars.clear();
         }
 
         println!("Exprs types:");
@@ -210,6 +241,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                         *let_stm_key,
                         LetStm {
                             bindings: HashMap::new(),
+                            ty: let_stm_type.clone(),
                         },
                     );
 
@@ -246,9 +278,6 @@ impl<'a> SemanticsAnalyzer<'a> {
                             while_scope_key,
                         );
                     }
-                }
-                Stm::If(if_expr) => {
-                    self.infer_if_expr(&if_expr);
                 }
                 Stm::Expr(expr_key) => {
                     self.infer(*expr_key);

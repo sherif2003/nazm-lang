@@ -1,5 +1,7 @@
 use nazmc_ast::{FieldsStructKey, TupleStructKey, UnitStructKey};
 use nazmc_data_pool::typed_index_collections::TiVec;
+use nazmc_diagnostics::span::Span;
+use std::collections::HashMap;
 use std::rc::Rc;
 use thin_vec::thin_vec;
 use thin_vec::ThinVec;
