@@ -150,54 +150,64 @@ impl<'a> SemanticsAnalyzer<'a> {
                 }
             }
         }
+
         self.ast.scopes[scope_key].stms = stms;
     }
 
     pub(crate) fn check_expr_ty_vars(&mut self, expr_key: ExprKey) {
-        match &self.ast.exprs[expr_key].kind {
+        let kind = std::mem::take(&mut self.ast.exprs[expr_key].kind);
+
+        let kind = match kind {
             ExprKind::Call(call_expr) => {
-                let call_expr = call_expr.clone(); // TODO: Remove the clone
                 self.check_expr_ty_vars(call_expr.on);
                 call_expr
                     .args
                     .iter()
                     .for_each(|&expr_key| self.check_expr_ty_vars(expr_key));
+
+                ExprKind::Call(call_expr)
             }
             ExprKind::Field(field_expr) => {
                 self.check_expr_ty_vars(field_expr.on);
+                ExprKind::Field(field_expr)
             }
             ExprKind::Idx(idx_expr) => {
-                let idx_expr = idx_expr.clone(); // TODO: Remove the clone
                 self.check_expr_ty_vars(idx_expr.on);
                 self.check_expr_ty_vars(idx_expr.idx);
+                ExprKind::Idx(idx_expr)
             }
             ExprKind::TupleIdx(tuple_idx_expr) => {
                 self.check_expr_ty_vars(tuple_idx_expr.on);
+                ExprKind::TupleIdx(tuple_idx_expr)
             }
             ExprKind::Tuple(exprs) => {
                 exprs
-                    .clone() // TODO: Remove the clone
-                    .into_iter()
-                    .for_each(|expr_key| self.check_expr_ty_vars(expr_key));
+                    .iter()
+                    .for_each(|&expr_key| self.check_expr_ty_vars(expr_key));
+
+                ExprKind::Tuple(exprs)
             }
             ExprKind::ArrayElemnts(elements) => {
                 elements
-                    .clone() // TODO: Remove the clone
-                    .into_iter()
-                    .for_each(|expr_key| self.check_expr_ty_vars(expr_key));
+                    .iter()
+                    .for_each(|&expr_key| self.check_expr_ty_vars(expr_key));
+
+                ExprKind::ArrayElemnts(elements)
             }
-            ExprKind::ArrayElemntsSized(array_elements_sized_expr) => todo!(),
             ExprKind::If(if_expr) => {
-                let if_expr = if_expr.clone(); // TODO: Remove the clone
                 self.check_expr_ty_vars(if_expr.if_.1);
                 self.check_scope_ty_vars(if_expr.if_.2);
-                for else_if in if_expr.else_ifs {
+
+                for else_if in &if_expr.else_ifs {
                     self.check_expr_ty_vars(else_if.1);
                     self.check_scope_ty_vars(else_if.2);
                 }
+
                 if let Some(else_) = if_expr.else_ {
                     self.check_scope_ty_vars(else_.1);
                 }
+
+                ExprKind::If(if_expr)
             }
             ExprKind::Lambda(lambda_expr) => {
                 let Type::Concrete(ConcreteType::Composite(CompositeType::Lambda {
@@ -207,8 +217,6 @@ impl<'a> SemanticsAnalyzer<'a> {
                 else {
                     unreachable!()
                 };
-
-                let lambda_expr = lambda_expr.clone(); // TODO: Remove the clone
 
                 for (i, param_type) in params_types.iter().enumerate() {
                     let binding = &lambda_expr.params[i];
@@ -231,25 +239,32 @@ impl<'a> SemanticsAnalyzer<'a> {
 
                 self.typed_ast.exprs.insert(expr_key, ty.clone());
 
+                self.ast.exprs[expr_key].kind = ExprKind::Lambda(lambda_expr);
+
                 return;
             }
             ExprKind::UnaryOp(unary_op_expr) => {
                 self.check_expr_ty_vars(unary_op_expr.expr);
+                ExprKind::UnaryOp(unary_op_expr)
             }
             ExprKind::BinaryOp(binary_op_expr) => {
-                let binary_op_expr = binary_op_expr.clone(); // TODO: Remove the clone
                 self.check_expr_ty_vars(binary_op_expr.left);
                 self.check_expr_ty_vars(binary_op_expr.right);
+                ExprKind::BinaryOp(binary_op_expr)
             }
             ExprKind::Return(return_expr) => {
                 if let Some(expr_key) = return_expr.expr {
                     self.check_expr_ty_vars(expr_key);
                 }
+                ExprKind::Return(return_expr)
             }
+            ExprKind::TupleStruct(_) => todo!(),
+            ExprKind::ArrayElemntsSized(_) => todo!(),
             ExprKind::On => todo!(),
-            _ => {}
+            kind @ _ => kind,
         };
 
+        self.ast.exprs[expr_key].kind = kind;
         let span = self.get_expr_span(expr_key);
         let ty = &self.typed_ast.exprs[&expr_key].clone();
         self.ty_var_check(&ty, span, true);

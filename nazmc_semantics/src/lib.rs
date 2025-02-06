@@ -99,74 +99,9 @@ impl<'a> SemanticsAnalyzer<'a> {
             self.analyze_fields_struct(struct_key);
         }
 
-        for fn_key in self.ast.fns.keys() {
-            self.analyze_fn_signature(fn_key);
-        }
+        self.analyze_fn_signatures();
 
-        // Will be restored to true by inner lambda scopes
-        self.current_lambda_scope_key = None;
-        self.current_lambda_first_implicit_return_ty_span = None;
-
-        // TODO: Remove the clone
-        // Don't take the ownership as the errors module requires the access to them
-        for (fn_key, _fn) in self.ast.fns.clone().iter_enumerated() {
-            self.current_file_key = _fn.info.file_key;
-            self.current_fn_key = fn_key;
-
-            self.current_scope_expected_return_ty =
-                if let Type::Concrete(ConcreteType::Composite(CompositeType::FnPtr {
-                    params_types: _,
-                    return_type,
-                })) = &*self.typed_ast.fns_signatures[&fn_key].borrow()
-                {
-                    return_type.clone()
-                } else {
-                    unreachable!()
-                };
-
-            let found_return_ty = self.infer_scope(_fn.scope_key);
-
-            if let Err(err) = self
-                .s
-                .unify(&self.current_scope_expected_return_ty, &found_return_ty)
-            {
-                let span = self.ast.scopes[_fn.scope_key].return_expr.map_or_else(
-                    || self.get_type_expr_span(_fn.return_type.unwrap()),
-                    |expr_key| self.get_expr_span(expr_key),
-                );
-
-                self.add_type_mismatch_in_fn_return_ty_err(
-                    fn_key,
-                    &self.current_scope_expected_return_ty.clone(),
-                    &found_return_ty,
-                    span,
-                );
-            }
-
-            self.check_scope_ty_vars(_fn.scope_key);
-
-            for (unknown_ty, span, first_used_span) in &self.unknown_type_errors {
-                println!("Span: {:?}", span);
-                let mut code_window =
-                    CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
-
-                if let Some(span) = first_used_span {
-                    code_window.mark_secondary(*span, vec!["يجب معرفة النوع هنا".into()]);
-                }
-
-                code_window.mark_error(*span, vec!["لا يمكن تحديد النوع هنا ضمنياً".into()]);
-
-                let diagnostic = Diagnostic::error(
-                    format!("يجب تحديد النوع `{}` بشكل خارجي", self.fmt_ty(unknown_ty)),
-                    vec![code_window],
-                );
-                self.diagnostics.push(diagnostic);
-            }
-
-            self.unknown_ty_vars.clear();
-            self.unknown_type_errors.clear();
-            // self.s.ty_vars.clear();
-        }
+        self.analyze_fn_bodies();
 
         println!("Exprs types:");
         println!("Len: {}", self.typed_ast.exprs.values().len());
@@ -192,22 +127,108 @@ impl<'a> SemanticsAnalyzer<'a> {
         // TODO
     }
 
-    fn analyze_fn_signature(&mut self, fn_key: FnKey) {
-        let params = self.ast.fns[fn_key]
-            .params
-            .clone() // TODO: Remove the clone
-            .iter()
-            .map(|(_, type_expr_key)| self.analyze_type_expr(*type_expr_key).0)
-            .collect::<ThinVec<_>>();
+    fn analyze_fn_signatures(&mut self) {
+        let fns = std::mem::take(&mut self.ast.fns);
 
-        let return_type = self.ast.fns[fn_key].return_type.map_or_else(
-            || Ty::unit(),
-            |type_expr_key| self.analyze_type_expr(type_expr_key).0,
-        );
+        for (fn_key, _fn) in fns.iter_enumerated() {
+            let params = _fn
+                .params
+                .iter()
+                .map(|(_, type_expr_key)| self.analyze_type_expr(*type_expr_key).0)
+                .collect::<ThinVec<_>>();
 
-        self.typed_ast
-            .fns_signatures
-            .insert(fn_key, Ty::fn_ptr(params, return_type));
+            let return_type = _fn.return_type.map_or_else(
+                || Ty::unit(),
+                |type_expr_key| self.analyze_type_expr(type_expr_key).0,
+            );
+
+            self.typed_ast
+                .fns_signatures
+                .insert(fn_key, Ty::fn_ptr(params, return_type));
+        }
+
+        self.ast.fns = fns;
+    }
+
+    fn analyze_fn_bodies(&mut self) {
+        // Will be restored to true by inner lambda scopes
+        self.current_lambda_scope_key = None;
+        self.current_lambda_first_implicit_return_ty_span = None;
+
+        for fn_key in self.ast.fns.keys() {
+            self.analyze_fn_body(fn_key);
+        }
+    }
+
+    fn analyze_fn_body(&mut self, fn_key: FnKey) {
+        self.current_fn_key = fn_key;
+        self.current_file_key = self.ast.fns[fn_key].info.file_key;
+
+        self.current_scope_expected_return_ty =
+            if let Type::Concrete(ConcreteType::Composite(CompositeType::FnPtr {
+                params_types: _,
+                return_type,
+            })) = &*self.typed_ast.fns_signatures[&fn_key].borrow()
+            {
+                return_type.clone()
+            } else {
+                unreachable!()
+            };
+
+        let found_return_ty = self.infer_scope(self.ast.fns[fn_key].scope_key);
+
+        if let Err(err) = self
+            .s
+            .unify(&self.current_scope_expected_return_ty, &found_return_ty)
+        {
+            let span = self.ast.scopes[self.ast.fns[fn_key].scope_key]
+                .return_expr
+                .map_or_else(
+                    || self.get_type_expr_span(self.ast.fns[fn_key].return_type.unwrap()),
+                    |expr_key| self.get_expr_span(expr_key),
+                );
+
+            self.add_type_mismatch_in_fn_return_ty_err(
+                fn_key,
+                &self.current_scope_expected_return_ty.clone(),
+                &found_return_ty,
+                span,
+            );
+        }
+
+        self.check_scope_ty_vars(self.ast.fns[fn_key].scope_key);
+
+        for (unknown_ty, span, first_used_span) in &self.unknown_type_errors {
+            println!("Span: {:?}", span);
+            let mut code_window =
+                CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
+
+            if let Some(span) = first_used_span {
+                code_window.mark_secondary(*span, vec!["يجب معرفة النوع هنا".into()]);
+            }
+
+            code_window.mark_error(*span, vec!["لا يمكن تحديد النوع هنا ضمنياً".into()]);
+
+            let diagnostic = Diagnostic::error(
+                format!("يجب تحديد النوع `{}` بشكل خارجي", self.fmt_ty(unknown_ty)),
+                vec![code_window],
+            );
+            self.diagnostics.push(diagnostic);
+        }
+
+        self.unknown_ty_vars.clear();
+        self.unknown_type_errors.clear();
+        // self.s.ty_vars.clear();
+    }
+
+    fn infer_scope(&mut self, scope_key: ScopeKey) -> Ty {
+        self.analyze_scope(scope_key);
+
+        let return_ty = self.ast.scopes[scope_key]
+            .return_expr
+            .map_or_else(|| Ty::unit(), |expr_key| self.infer(expr_key));
+
+        return_ty
     }
 
     fn analyze_scope(&mut self, scope_key: ScopeKey) {

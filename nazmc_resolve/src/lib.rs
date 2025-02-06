@@ -366,9 +366,6 @@ impl<'a> NameResolver<'a> {
     ) {
         let stack_start_idx = lets_haystacks.len();
 
-        // Take the ownershp temporarily
-        let scope = std::mem::take(&mut self.ast.scopes[scope_key]);
-
         // Scope events are in unresolved state of AST, so, there is no need to restore the ownership
         'label: for event in std::mem::take(&mut self.ast.state.scope_events[scope_key]) {
             match event {
@@ -476,9 +473,6 @@ impl<'a> NameResolver<'a> {
                 }
             }
         }
-
-        // Restore the ownership
-        self.ast.scopes[scope_key] = scope;
 
         lets_haystacks.truncate(stack_start_idx);
     }

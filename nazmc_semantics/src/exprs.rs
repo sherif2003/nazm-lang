@@ -9,61 +9,69 @@ use crate::{
 use thin_vec::thin_vec;
 
 impl<'a> SemanticsAnalyzer<'a> {
-    pub(crate) fn infer_scope(&mut self, scope_key: ScopeKey) -> Ty {
-        self.analyze_scope(scope_key);
-
-        let return_ty = self.ast.scopes[scope_key]
-            .return_expr
-            .map_or_else(|| Ty::unit(), |expr_key| self.infer(expr_key));
-
-        return_ty
-    }
-
     pub(crate) fn infer(&mut self, expr_key: ExprKey) -> Ty {
-        let ty = match &self.ast.exprs[expr_key].kind {
-            ExprKind::Unit => Ty::unit(),
-            ExprKind::Literal(lit_expr) => self.infer_lit_expr(*lit_expr),
-            ExprKind::PathNoPkg(path_no_pkg_key) => self.infer_path_no_pkg_expr(*path_no_pkg_key),
-            ExprKind::PathInPkg(path_with_pkg_key) => {
-                self.infer_path_with_pkg_expr(*path_with_pkg_key)
+        let kind = std::mem::take(&mut self.ast.exprs[expr_key].kind);
+        let (ty, kind) = match kind {
+            ExprKind::Unit => (Ty::unit(), ExprKind::Unit),
+            ExprKind::Literal(lit_expr) => {
+                (self.infer_lit_expr(lit_expr), ExprKind::Literal(lit_expr))
             }
+            ExprKind::PathNoPkg(path_no_pkg_key) => (
+                self.infer_path_no_pkg_expr(path_no_pkg_key),
+                ExprKind::PathNoPkg(path_no_pkg_key),
+            ),
+            ExprKind::PathInPkg(path_with_pkg_key) => (
+                self.infer_path_with_pkg_expr(path_with_pkg_key),
+                ExprKind::PathInPkg(path_with_pkg_key),
+            ),
             ExprKind::UnitStruct(unit_struct_path_key) => {
-                let key = self.ast.state.unit_structs_paths_exprs[*unit_struct_path_key];
-                Ty::unit_struct(key)
+                let key = self.ast.state.unit_structs_paths_exprs[unit_struct_path_key];
+                (
+                    Ty::unit_struct(key),
+                    ExprKind::UnitStruct(unit_struct_path_key),
+                )
             }
             ExprKind::Tuple(thin_vec) => {
-                let types = thin_vec
-                    .clone() // TODO: Remove the clone
-                    .into_iter()
-                    .map(|expr_key| self.infer(expr_key));
-                Ty::tuple(types)
+                let types = thin_vec.iter().map(|&expr_key| self.infer(expr_key));
+                (Ty::tuple(types), ExprKind::Tuple(thin_vec))
             }
-            ExprKind::Call(call_expr) => self.infer_call_expr(&call_expr.clone()), // TODO: Remove the clone
-            ExprKind::Idx(idx_expr) => self.infer_idx_expr(&idx_expr.clone()), // TODO: Remove the clone
-            ExprKind::ArrayElemnts(elements) => {
-                self.infer_array_elements(&elements.clone()) // TODO: Remove the clone
+            ExprKind::Call(call_expr) => {
+                (self.infer_call_expr(&call_expr), ExprKind::Call(call_expr))
             }
-            ExprKind::TupleIdx(tuple_idx_expr) => {
-                self.infer_tuple_idx_expr(&tuple_idx_expr.clone()) // TODO: Remove the clone
-            }
-            ExprKind::FieldsStruct(fields_struct_expr) => {
-                // TODO: Remove the clone
-                self.infer_fields_struct_expr(&fields_struct_expr.clone(), expr_key)
-            }
-            ExprKind::If(if_expr) => self.infer_if_expr(&if_expr.clone()), // TODO: Remove the clone
-            ExprKind::Field(field_expr) => {
-                self.infer_field_expr(&field_expr.clone()) // TODO: Remove the clone
-            }
-            ExprKind::Lambda(lambda_expr) => self.infer_lambda_expr(&lambda_expr.clone()), // TODO: Remove the clone
+            ExprKind::Idx(idx_expr) => (self.infer_idx_expr(&idx_expr), ExprKind::Idx(idx_expr)),
+            ExprKind::ArrayElemnts(elements) => (
+                self.infer_array_elements(&elements),
+                ExprKind::ArrayElemnts(elements),
+            ),
+            ExprKind::TupleIdx(tuple_idx_expr) => (
+                self.infer_tuple_idx_expr(&tuple_idx_expr),
+                ExprKind::TupleIdx(tuple_idx_expr),
+            ),
+            ExprKind::FieldsStruct(fields_struct_expr) => (
+                self.infer_fields_struct_expr(&fields_struct_expr, expr_key),
+                ExprKind::FieldsStruct(fields_struct_expr),
+            ),
+            ExprKind::If(if_expr) => (self.infer_if_expr(&if_expr), ExprKind::If(if_expr)),
+            ExprKind::Field(field_expr) => (
+                self.infer_field_expr(&field_expr),
+                ExprKind::Field(field_expr),
+            ),
+            ExprKind::Lambda(lambda_expr) => (
+                self.infer_lambda_expr(&lambda_expr),
+                ExprKind::Lambda(lambda_expr),
+            ),
             ExprKind::TupleStruct(_) => todo!(),
             ExprKind::ArrayElemntsSized(_) => todo!(),
-            ExprKind::UnaryOp(unary_op_expr) => {
-                // TODO: Remove the clone
-                self.infer_unary_op_expr(&unary_op_expr.clone())
-            }
-            ExprKind::BinaryOp(binary_op_expr) => self.infer_bin_op_expr(&binary_op_expr.clone()), // TODO: Remove the clone
             ExprKind::On => todo!(),
-            ExprKind::Break | ExprKind::Continue => {
+            ExprKind::UnaryOp(unary_op_expr) => (
+                self.infer_unary_op_expr(&unary_op_expr),
+                ExprKind::UnaryOp(unary_op_expr),
+            ),
+            ExprKind::BinaryOp(binary_op_expr) => (
+                self.infer_bin_op_expr(&binary_op_expr),
+                ExprKind::BinaryOp(binary_op_expr),
+            ),
+            kind @ (ExprKind::Break | ExprKind::Continue) => {
                 if !self.is_inside_loop {
                     let span = self.get_expr_span(expr_key);
                     let mut code_window =
@@ -75,10 +83,15 @@ impl<'a> SemanticsAnalyzer<'a> {
                     );
                     self.diagnostics.push(diagnostic);
                 }
-                self.s.new_never_ty_var()
+                (self.s.new_never_ty_var(), kind)
             }
-            ExprKind::Return(return_expr) => self.infer_return_expr(&return_expr.clone()), // TODO: Remove the clone
+            ExprKind::Return(return_expr) => (
+                self.infer_return_expr(&return_expr),
+                ExprKind::Return(return_expr),
+            ),
         };
+
+        self.ast.exprs[expr_key].kind = kind;
 
         self.typed_ast.exprs.insert(expr_key, ty.clone());
 
