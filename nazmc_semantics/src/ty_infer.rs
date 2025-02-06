@@ -449,10 +449,7 @@ impl TyInfer {
             (Type::TyVar(key1), Type::TyVar(key2)) if key1 == key2 => Ok(()),
 
             (Type::TyVar(key1), Type::TyVar(key2)) => {
-                // Clone constraints for clarity.
-                let sub1 = self.ty_vars[key1].clone();
-                let sub2 = self.ty_vars[key2].clone();
-                match (sub1, sub2) {
+                match (&self.ty_vars[key1], &self.ty_vars[key2]) {
                     (
                         TyVarSubstitution::Any | TyVarSubstitution::Never,
                         TyVarSubstitution::Any | TyVarSubstitution::Never,
@@ -482,26 +479,27 @@ impl TyInfer {
                         let allowed1 = self.apply_on_constraints(&allowed1);
                         let allowed2 = self.apply_on_constraints(&allowed2);
                         // Compute the intersection of both allowed sets.
-                        let intersection = self.get_constraints_intersection(&allowed1, &allowed2);
+                        let mut intersection =
+                            self.get_constraints_intersection(&allowed1, &allowed2);
 
-                        if intersection.is_empty() {
-                            // No common alternative exists.
-                            Err(())
-                        } else if intersection.len() == 1 {
-                            // The constraint is now fully determined.
-                            self.ty_vars[key1] = TyVarSubstitution::Determined(Ty::concrete(
-                                intersection[0].clone(),
-                            ));
+                        if let Some(concrete_ty) = intersection.pop() {
+                            if intersection.is_empty() {
+                                // The constraint is now fully determined.
+                                self.ty_vars[key1] =
+                                    TyVarSubstitution::Determined(Ty::concrete(concrete_ty));
+                            } else {
+                                intersection.push(concrete_ty);
+                                // More than one possibility remains: update one variable with the intersected constraint.
+                                self.ty_vars[key1] = TyVarSubstitution::AnyOf(intersection);
+                            }
+
                             // Link the other variable to key1.
                             self.ty_vars[key2] = TyVarSubstitution::Determined(Ty::type_var(key1));
+
                             Ok(())
                         } else {
-                            // More than one possibility remains: update one variable with the intersected constraint.
-                            self.ty_vars[key1] = TyVarSubstitution::AnyOf(
-                                intersection.into_iter().map(|c| c.clone()).collect(),
-                            );
-                            self.ty_vars[key2] = TyVarSubstitution::Determined(Ty::type_var(key1));
-                            Ok(())
+                            // No common alternative exists.
+                            Err(())
                         }
                     }
                     // Should not reach here if Determined states are fully applied via `apply`.
@@ -516,13 +514,11 @@ impl TyInfer {
                     return Err(());
                 }
 
-                let substiution = std::mem::take(&mut self.ty_vars[key]);
-
-                match substiution {
+                match &self.ty_vars[key] {
                     TyVarSubstitution::Any | TyVarSubstitution::Never => {
                         // No constraints; simply substitute.
                         self.ty_vars[key] =
-                            TyVarSubstitution::Determined(Ty::concrete(concrete_type.clone()));
+                            TyVarSubstitution::Determined(Ty::concrete(concrete_type));
                         Ok(())
                     }
                     TyVarSubstitution::AnyOf(existing) => {
@@ -530,10 +526,9 @@ impl TyInfer {
                         // Check if the concrete type is one of the allowed alternatives.
                         if self.is_ty_in_constraints(&concrete_type, &allowed) {
                             self.ty_vars[key] =
-                                TyVarSubstitution::Determined(Ty::concrete(concrete_type.clone()));
+                                TyVarSubstitution::Determined(Ty::concrete(concrete_type));
                             Ok(())
                         } else {
-                            self.ty_vars[key] = TyVarSubstitution::AnyOf(existing);
                             // The concrete type does not satisfy the constraint.
                             Err(())
                         }
@@ -648,18 +643,22 @@ impl TyInfer {
                     }
                     // If already constrained, intersect the new allowed set with the existing one.
                     TyVarSubstitution::AnyOf(existing) => {
-                        let new_allowed = self.get_constraints_intersection(&allowed, &existing);
-                        if new_allowed.is_empty() {
+                        let mut new_allowed =
+                            self.get_constraints_intersection(&allowed, &existing);
+
+                        if let Some(concrete_ty) = new_allowed.pop() {
+                            if new_allowed.is_empty() {
+                                self.ty_vars[*key] =
+                                    TyVarSubstitution::Determined(Ty::concrete(concrete_ty));
+                            } else {
+                                new_allowed.push(concrete_ty);
+                                self.ty_vars[*key] = TyVarSubstitution::AnyOf(new_allowed);
+                            }
+                            Ok(())
+                        } else {
                             // No candidate is allowed by both constraints.
                             self.ty_vars[*key] = TyVarSubstitution::AnyOf(existing);
                             Err(())
-                        } else if new_allowed.len() == 1 {
-                            self.ty_vars[*key] =
-                                TyVarSubstitution::Determined(Ty::concrete(new_allowed[0].clone()));
-                            Ok(())
-                        } else {
-                            self.ty_vars[*key] = TyVarSubstitution::AnyOf(new_allowed);
-                            Ok(())
                         }
                     }
                     // If already determined, check that the concrete type is one of the allowed alternatives.
@@ -687,12 +686,9 @@ impl TyInfer {
         result
     }
 
-    pub(crate) fn apply_on_constraints(
-        &mut self,
-        allowed: &[ConcreteType],
-    ) -> ThinVec<ConcreteType> {
+    pub(crate) fn apply_on_constraints(&self, allowed: &[ConcreteType]) -> ThinVec<ConcreteType> {
         allowed
-            .into_iter()
+            .iter()
             .map(|c| self.apply_on_concrete(&c))
             .collect::<ThinVec<_>>()
     }
@@ -703,7 +699,7 @@ impl TyInfer {
         allowed2: &[ConcreteType],
     ) -> ThinVec<ConcreteType> {
         allowed1
-            .into_iter()
+            .iter()
             .filter(|ty| self.is_ty_in_constraints(ty, &allowed2))
             .map(|ty| ty.clone())
             .collect::<ThinVec<_>>()
