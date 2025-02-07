@@ -1,4 +1,7 @@
-use crate::*;
+use crate::{
+    ty_infer::{NumberConstraints, TyVarSubstitution},
+    *,
+};
 
 impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn ty_var_check(&mut self, base_ty: &Ty, span: Span, is_expr: bool) -> Ty {
@@ -23,8 +26,12 @@ impl<'a> SemanticsAnalyzer<'a> {
     ) {
         match applied_ty.borrow() {
             Type::TyVar(key) => match &self.s.ty_vars[*key] {
-                ty_infer::TyVarSubstitution::Never => {}
-                ty_infer::TyVarSubstitution::Any | ty_infer::TyVarSubstitution::Error => {
+                TyVarSubstitution::Never => {}
+                TyVarSubstitution::Any
+                | TyVarSubstitution::Error
+                | TyVarSubstitution::ConstrainedNumber(
+                    NumberConstraints::Any | NumberConstraints::Signed,
+                ) => {
                     if let Some(&err_msg_idx) = self.unknown_ty_vars.get(key) {
                         if self.unknown_type_errors[err_msg_idx].2.is_none() && is_expr {
                             self.unknown_type_errors[err_msg_idx].2 = Some(span)
@@ -47,18 +54,15 @@ impl<'a> SemanticsAnalyzer<'a> {
                         self.unknown_ty_vars.insert(*key, err_msg_idx);
                     }
                 }
-                ty_infer::TyVarSubstitution::AnyOf(types) => {
-                    for con_ty in types.clone() {
-                        self.concrete_ty_check(
-                            base_ty,
-                            &con_ty,
-                            span,
-                            possible_new_err_msg_idx,
-                            is_expr,
-                        );
-                    }
+                TyVarSubstitution::ConstrainedNumber(
+                    NumberConstraints::Int | NumberConstraints::SignedInt,
+                ) => {
+                    self.s.ty_vars[*key] = TyVarSubstitution::Determined(Ty::i4());
                 }
-                ty_infer::TyVarSubstitution::Determined(determined) => self.ty_check(
+                TyVarSubstitution::ConstrainedNumber(NumberConstraints::Float) => {
+                    self.s.ty_vars[*key] = TyVarSubstitution::Determined(Ty::f4());
+                }
+                TyVarSubstitution::Determined(determined) => self.ty_check(
                     base_ty,
                     &determined.clone(),
                     span,

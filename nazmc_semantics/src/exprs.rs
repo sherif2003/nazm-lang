@@ -1,7 +1,7 @@
 use nazmc_diagnostics::span::SpanCursor;
 
 use crate::{
-    ty_infer::{CompositeType, ConcreteType, TyVarSubstitution, Type},
+    ty_infer::{CompositeType, ConcreteType, NumberConstraints, TyVarSubstitution, Type},
     typed_ast::{FieldInfo, LambdaParams},
     *,
 };
@@ -116,20 +116,8 @@ impl<'a> SemanticsAnalyzer<'a> {
                 NumKind::U2(_) => Ty::u2(),
                 NumKind::U4(_) => Ty::u4(),
                 NumKind::U8(_) => Ty::u8(),
-                NumKind::UnspecifiedInt(_) => {
-                    let ty_var = self.s.new_ty_var();
-                    let _ = self
-                        .s
-                        .constrain_type_var(&ty_var, TyInfer::unspecified_int_constraints());
-                    return ty_var;
-                }
-                NumKind::UnspecifiedFloat(_) => {
-                    let ty_var = self.s.new_ty_var();
-                    let _ = self
-                        .s
-                        .constrain_type_var(&ty_var, TyInfer::unspecified_float_constraints());
-                    return ty_var;
-                }
+                NumKind::UnspecifiedInt(_) => self.s.new_int_ty_var(),
+                NumKind::UnspecifiedFloat(_) => self.s.new_float_ty_var(),
             },
         }
     }
@@ -721,10 +709,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         match op {
             UnaryOp::Minus => {
-                if let Err(err) = self
-                    .s
-                    .constrain_type_var(&inner, TyInfer::unspecified_signed_number_constraints())
-                {
+                if let Err(err) = self.s.constrain_type_var(&inner, NumberConstraints::Signed) {
                     self.add_type_mismatch_in_op_err(&Ty::i4(), &inner, *expr, *op_span);
                     Ty::i4()
                 } else {
@@ -900,10 +885,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     fn unify_with_int_num(&mut self, found_ty: &Ty, expr_key: ExprKey, op_span: &Span) -> bool {
-        if let Err(err) = self
-            .s
-            .constrain_type_var(&found_ty, TyInfer::unspecified_int_constraints())
-        {
+        if let Err(err) = self.s.constrain_type_var(&found_ty, NumberConstraints::Int) {
             self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, expr_key, *op_span);
             false
         } else {
@@ -912,10 +894,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     fn unify_with_num(&mut self, found_ty: &Ty, expr_key: ExprKey, op_span: &Span) -> bool {
-        if let Err(err) = self
-            .s
-            .constrain_type_var(&found_ty, TyInfer::unspecified_number_constraints())
-        {
+        if let Err(err) = self.s.constrain_type_var(&found_ty, NumberConstraints::Any) {
             self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, expr_key, *op_span);
             false
         } else {

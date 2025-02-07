@@ -33,7 +33,80 @@ impl<T: Clone> RcCell<T> {
     }
 }
 
-pub type Ty = RcCell<Type>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) enum NumberConstraints {
+    #[default]
+    Any,
+    Signed,
+    Int,
+    SignedInt,
+    Float,
+}
+
+impl NumberConstraints {
+    fn get_intersection(
+        one: NumberConstraints,
+        two: NumberConstraints,
+    ) -> Option<NumberConstraints> {
+        use NumberConstraints::*;
+        match (one, two) {
+            // Any intersected with anything is that thing.
+            (Any, x) | (x, Any) => Some(x),
+
+            (Signed, Signed) => Some(Signed),
+            (Int, Int) => Some(Int),
+
+            (Signed, Int)
+            | (Int, Signed)
+            | (Signed, SignedInt)
+            | (SignedInt, Signed)
+            | (Int, SignedInt)
+            | (SignedInt, Int)
+            | (SignedInt, SignedInt) => Some(SignedInt),
+
+            (Signed, Float) | (Float, Signed) | (Float, Float) => Some(Float),
+
+            (Int, Float) | (Float, Int) | (SignedInt, Float) | (Float, SignedInt) => None,
+        }
+    }
+
+    fn contains(&self, concrete_ty: &ConcreteType) -> bool {
+        use NumberConstraints::*;
+        use PrimitiveType::*;
+
+        // We only handle Primitive types.
+        let ConcreteType::Primitive(prim_ty) = concrete_ty else {
+            return false;
+        };
+        match self {
+            Any => matches!(
+                prim_ty,
+                I | I1 | I2 | I4 | I8 | U | U1 | U2 | U4 | U8 | F4 | F8
+            ),
+            Signed => matches!(prim_ty, I | I1 | I2 | I4 | I8 | F4 | F8),
+            Int => matches!(prim_ty, I | I1 | I2 | I4 | I8 | U | U1 | U2 | U4 | U8),
+            SignedInt => matches!(prim_ty, I | I1 | I2 | I4 | I8),
+            Float => matches!(prim_ty, F4 | F8),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub(crate) enum TyVarSubstitution {
+    #[default]
+    Any,
+    Never,
+    Error,
+    ConstrainedNumber(NumberConstraints),
+    Determined(Ty),
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct TyInfer {
+    pub(crate) ty_vars: TiVec<TypeVarKey, TyVarSubstitution>,
+}
+
+pub(crate) type Ty = RcCell<Type>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
@@ -77,7 +150,6 @@ pub enum CompositeType {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum PrimitiveType {
     #[default]
-    Never,
     Unit,
     I,
     I1,
@@ -229,86 +301,81 @@ impl Ty {
         })
     }
 
-    /// Create a `ConcreteTyp::Never` type.
-    pub fn never() -> Self {
-        Self::primitive(PrimitiveType::Never)
-    }
-
-    /// Create a `ConcreteTyp::Unit` type.
+    /// Create a `ConcreteType::Unit` type.
     pub fn unit() -> Self {
         Self::primitive(PrimitiveType::Unit)
     }
 
-    /// Create a `ConcreteTyp::I` type.
+    /// Create a `ConcreteType::I` type.
     pub fn i() -> Self {
         Self::primitive(PrimitiveType::I)
     }
 
-    /// Create a `ConcreteTyp::I1` type.
+    /// Create a `ConcreteType::I1` type.
     pub fn i1() -> Self {
         Self::primitive(PrimitiveType::I1)
     }
 
-    /// Create a `ConcreteTyp::I2` type.
+    /// Create a `ConcreteType::I2` type.
     pub fn i2() -> Self {
         Self::primitive(PrimitiveType::I2)
     }
 
-    /// Create a `ConcreteTyp::I4` type.
+    /// Create a `ConcreteType::I4` type.
     pub fn i4() -> Self {
         Self::primitive(PrimitiveType::I4)
     }
 
-    /// Create a `ConcreteTyp::I8` type.
+    /// Create a `ConcreteType::I8` type.
     pub fn i8() -> Self {
         Self::primitive(PrimitiveType::I8)
     }
-    /// Create a `ConcreteTyp::U` type.
+    /// Create a `ConcreteType::U` type.
     pub fn u() -> Self {
         Self::primitive(PrimitiveType::U)
     }
 
-    /// Create a `ConcreteTyp::U1` type.
+    /// Create a `ConcreteType::U1` type.
     pub fn u1() -> Self {
         Self::primitive(PrimitiveType::U1)
     }
 
-    /// Create a `ConcreteTyp::U2` type.
+    /// Create a `ConcreteType::U2` type.
     pub fn u2() -> Self {
         Self::primitive(PrimitiveType::U2)
     }
 
-    /// Create a `ConcreteTyp::U4` type.
+    /// Create a `ConcreteType::U4` type.
     pub fn u4() -> Self {
         Self::primitive(PrimitiveType::U4)
     }
 
-    /// Create a `ConcreteTyp::U8` type.
+    /// Create a `ConcreteType::U8` type.
     pub fn u8() -> Self {
         Self::primitive(PrimitiveType::U8)
     }
 
-    /// Create a `ConcreteTyp::F4` type.
+    /// Create a `ConcreteType::F4` type.
     pub fn f4() -> Self {
         Self::primitive(PrimitiveType::F4)
     }
 
-    /// Create a `ConcreteTyp::F8` type.
+    /// Create a `ConcreteType::F8` type.
     pub fn f8() -> Self {
         Self::primitive(PrimitiveType::F8)
     }
 
-    /// Create a `ConcreteTyp::Bool` type.
+    /// Create a `ConcreteType::Bool` type.
     pub fn boolean() -> Self {
         Self::primitive(PrimitiveType::Bool)
     }
 
-    /// Create a `ConcreteTyp::Char` type.
+    /// Create a `ConcreteType::Char` type.
     pub fn character() -> Self {
         Self::primitive(PrimitiveType::Char)
     }
 
-    /// Create a `ConcreteTyp::Str` type.
+    /// Create a `ConcreteType::Str` type.
     pub fn string() -> Self {
         Self::primitive(PrimitiveType::Str)
     }
@@ -316,23 +383,8 @@ impl Ty {
 
 impl Default for Ty {
     fn default() -> Self {
-        Self::never()
+        Self::unit()
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
-pub enum TyVarSubstitution {
-    #[default]
-    Any,
-    Never,
-    Error,
-    AnyOf(ThinVec<ConcreteType>),
-    Determined(Ty),
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct TyInfer {
-    pub(crate) ty_vars: TiVec<TypeVarKey, TyVarSubstitution>,
 }
 
 impl TyInfer {
@@ -346,8 +398,19 @@ impl TyInfer {
         Ty::type_var(ty_var_key)
     }
 
-    pub(crate) fn new_error_ty_var(&mut self) -> Ty {
-        let ty_var_key = self.ty_vars.push_and_get_key(TyVarSubstitution::Error);
+    pub(crate) fn new_int_ty_var(&mut self) -> Ty {
+        let ty_var_key = self
+            .ty_vars
+            .push_and_get_key(TyVarSubstitution::ConstrainedNumber(NumberConstraints::Int));
+        Ty::type_var(ty_var_key)
+    }
+
+    pub(crate) fn new_float_ty_var(&mut self) -> Ty {
+        let ty_var_key = self
+            .ty_vars
+            .push_and_get_key(TyVarSubstitution::ConstrainedNumber(
+                NumberConstraints::Float,
+            ));
         Ty::type_var(ty_var_key)
     }
 
@@ -364,7 +427,7 @@ impl TyInfer {
                     TyVarSubstitution::Any
                     | TyVarSubstitution::Never
                     | TyVarSubstitution::Error
-                    | TyVarSubstitution::AnyOf(_) => ty.clone(),
+                    | TyVarSubstitution::ConstrainedNumber(_) => ty.clone(),
                 }
             }
         }
@@ -418,30 +481,6 @@ impl TyInfer {
         }
     }
 
-    pub(crate) fn try_unify(&mut self, t1: &Ty, t2: &Ty) -> Result<(), ()> {
-        let old_state = self.ty_vars.clone();
-        if let Err(err) = self.unify(t1, t2) {
-            self.ty_vars = old_state;
-            Err(err)
-        } else {
-            Ok(())
-        }
-    }
-
-    pub(crate) fn try_unify_concrete(
-        &mut self,
-        t1: &ConcreteType,
-        t2: &ConcreteType,
-    ) -> Result<(), ()> {
-        let old_state = self.ty_vars.clone();
-        if let Err(err) = self.unify_concrete(t1, t2) {
-            self.ty_vars = old_state;
-            Err(err)
-        } else {
-            Ok(())
-        }
-    }
-
     pub(crate) fn unify(&mut self, t1: &Ty, t2: &Ty) -> Result<(), ()> {
         let t1 = self.apply(t1);
         let t2 = self.apply(t2);
@@ -457,7 +496,7 @@ impl TyInfer {
                 match (&self.ty_vars[key1], &self.ty_vars[key2]) {
                     (TyVarSubstitution::Error, _)
                     | (
-                        TyVarSubstitution::AnyOf(_),
+                        TyVarSubstitution::ConstrainedNumber(_),
                         TyVarSubstitution::Any | TyVarSubstitution::Never,
                     ) => {
                         self.ty_vars[key2] = TyVarSubstitution::Determined(Ty::type_var(key1));
@@ -470,35 +509,26 @@ impl TyInfer {
                     )
                     | (
                         TyVarSubstitution::Any | TyVarSubstitution::Never,
-                        TyVarSubstitution::AnyOf(_),
+                        TyVarSubstitution::ConstrainedNumber(_),
                     ) => {
                         self.ty_vars[key1] = TyVarSubstitution::Determined(Ty::type_var(key2));
                         Ok(())
                     }
-                    (TyVarSubstitution::AnyOf(allowed1), TyVarSubstitution::AnyOf(allowed2)) => {
-                        let allowed1 = self.apply_on_constraints(&allowed1);
-                        let allowed2 = self.apply_on_constraints(&allowed2);
-                        // Compute the intersection of both allowed sets.
-                        let mut intersection =
-                            self.get_constraints_intersection(&allowed1, &allowed2);
-
-                        if let Some(concrete_ty) = intersection.pop() {
-                            if intersection.is_empty() {
-                                // The constraint is now fully determined.
-                                self.ty_vars[key1] =
-                                    TyVarSubstitution::Determined(Ty::concrete(concrete_ty));
-                            } else {
-                                intersection.push(concrete_ty);
-                                // More than one possibility remains: update one variable with the intersected constraint.
-                                self.ty_vars[key1] = TyVarSubstitution::AnyOf(intersection);
-                            }
+                    (
+                        TyVarSubstitution::ConstrainedNumber(constraints1),
+                        TyVarSubstitution::ConstrainedNumber(constraints2),
+                    ) => {
+                        if let Some(intersection) =
+                            NumberConstraints::get_intersection(*constraints1, *constraints2)
+                        {
+                            // More than one possibility remains: update one variable with the intersected constraint.
+                            self.ty_vars[key1] = TyVarSubstitution::ConstrainedNumber(intersection);
 
                             // Link the other variable to key1.
                             self.ty_vars[key2] = TyVarSubstitution::Determined(Ty::type_var(key1));
 
                             Ok(())
                         } else {
-                            // No common alternative exists.
                             Err(())
                         }
                     }
@@ -507,10 +537,10 @@ impl TyInfer {
                 }
             }
 
-            (Type::TyVar(key), Type::Concrete(concrete_type))
-            | (Type::Concrete(concrete_type), Type::TyVar(key)) => {
+            (Type::TyVar(key), Type::Concrete(concrete_ty))
+            | (Type::Concrete(concrete_ty), Type::TyVar(key)) => {
                 // Ensure we do not introduce an infinite type.
-                if concrete_type.occurs_check(key) {
+                if concrete_ty.occurs_check(key) {
                     return Err(());
                 }
 
@@ -519,18 +549,17 @@ impl TyInfer {
                     TyVarSubstitution::Any | TyVarSubstitution::Never => {
                         // No constraints; simply substitute.
                         self.ty_vars[key] =
-                            TyVarSubstitution::Determined(Ty::concrete(concrete_type));
+                            TyVarSubstitution::Determined(Ty::concrete(concrete_ty));
                         Ok(())
                     }
-                    TyVarSubstitution::AnyOf(existing) => {
-                        let allowed = self.apply_on_constraints(&existing);
-                        // Check if the concrete type is one of the allowed alternatives.
-                        if self.is_ty_in_constraints(&concrete_type, &allowed) {
+                    TyVarSubstitution::ConstrainedNumber(constraints) => {
+                        // Check if the concrete type is one of the allowed costraints.
+                        if constraints.contains(&concrete_ty) {
                             self.ty_vars[key] =
-                                TyVarSubstitution::Determined(Ty::concrete(concrete_type));
+                                TyVarSubstitution::Determined(Ty::concrete(concrete_ty));
                             Ok(())
                         } else {
-                            // The concrete type does not satisfy the constraint.
+                            // The concrete type does not satisfy the constraints.
                             Err(())
                         }
                     }
@@ -625,11 +654,10 @@ impl TyInfer {
     pub fn constrain_type_var(
         &mut self,
         ty: &Ty,
-        allowed: ThinVec<ConcreteType>,
+        constraints: NumberConstraints,
     ) -> Result<(), ()> {
         // First, apply all substitutions to get the current “resolved” type.
         let applied = self.apply(ty);
-        let allowed = self.apply_on_constraints(&allowed);
 
         let result = match &*applied.borrow() {
             // If we have a type variable…
@@ -640,81 +668,35 @@ impl TyInfer {
                     TyVarSubstitution::Error => Ok(()), // The error will be reported
                     // If unconstrained, just set the allowed set.
                     TyVarSubstitution::Any | TyVarSubstitution::Never => {
-                        self.ty_vars[*key] = TyVarSubstitution::AnyOf(allowed);
+                        self.ty_vars[*key] = TyVarSubstitution::ConstrainedNumber(constraints);
                         Ok(())
                     }
                     // If already constrained, intersect the new allowed set with the existing one.
-                    TyVarSubstitution::AnyOf(existing) => {
-                        let mut new_allowed =
-                            self.get_constraints_intersection(&allowed, &existing);
-
-                        if let Some(concrete_ty) = new_allowed.pop() {
-                            if new_allowed.is_empty() {
-                                self.ty_vars[*key] =
-                                    TyVarSubstitution::Determined(Ty::concrete(concrete_ty));
-                            } else {
-                                new_allowed.push(concrete_ty);
-                                self.ty_vars[*key] = TyVarSubstitution::AnyOf(new_allowed);
-                            }
+                    TyVarSubstitution::ConstrainedNumber(existing_constraints) => {
+                        if let Some(intersection) =
+                            NumberConstraints::get_intersection(constraints, existing_constraints)
+                        {
+                            // More than one possibility remains: update one variable with the intersected constraint.
+                            self.ty_vars[*key] = TyVarSubstitution::ConstrainedNumber(intersection);
                             Ok(())
                         } else {
-                            // No candidate is allowed by both constraints.
-                            // self.ty_vars[*key] = TyVarSubstitution::AnyOf(existing);
                             Err(())
                         }
                     }
                     // If already determined, check that the concrete type is one of the allowed alternatives.
-                    TyVarSubstitution::Determined(determined) => {
-                        let result = match &*determined.borrow() {
-                            Type::Concrete(c) if self.is_ty_in_constraints(c, &allowed) => Ok(()),
-                            _ => Err(()),
-                        };
-
-                        // self.ty_vars[*key] = TyVarSubstitution::Determined(determined);
-                        result
-                    }
+                    TyVarSubstitution::Determined(determined) => match &*determined.borrow() {
+                        Type::Concrete(c) if constraints.contains(c) => Ok(()),
+                        _ => Err(()),
+                    },
                 }
             }
             // If the type is already concrete, verify that it is one of the allowed alternatives.
-            Type::Concrete(c) => {
-                if self.is_ty_in_constraints(c, &allowed) {
-                    Ok(())
-                } else {
-                    Err(())
-                }
-            }
+            Type::Concrete(c) if constraints.contains(c) => Ok(()),
+
+            _ => Err(()),
         };
 
         result
-    }
-
-    pub(crate) fn apply_on_constraints(&self, allowed: &[ConcreteType]) -> ThinVec<ConcreteType> {
-        allowed
-            .iter()
-            .map(|c| self.apply_on_concrete(&c))
-            .collect::<ThinVec<_>>()
-    }
-
-    pub(crate) fn get_constraints_intersection(
-        &mut self,
-        allowed1: &[ConcreteType],
-        allowed2: &[ConcreteType],
-    ) -> ThinVec<ConcreteType> {
-        allowed1
-            .iter()
-            .filter(|ty| self.is_ty_in_constraints(ty, &allowed2))
-            .map(|ty| ty.clone())
-            .collect::<ThinVec<_>>()
-    }
-
-    pub(crate) fn is_ty_in_constraints(
-        &mut self,
-        ty: &ConcreteType,
-        allowed: &[ConcreteType],
-    ) -> bool {
-        allowed
-            .iter()
-            .any(|alt| self.try_unify_concrete(&alt, &ty).is_ok())
     }
 
     pub(crate) fn unspecified_number_constraints() -> ThinVec<ConcreteType> {
@@ -770,7 +752,7 @@ impl TyInfer {
     pub(crate) fn make_ty_var_error(&mut self, key: TypeVarKey) -> bool {
         if matches!(
             self.ty_vars[key],
-            TyVarSubstitution::Determined(_) | TyVarSubstitution::AnyOf(_)
+            TyVarSubstitution::Determined(_) | TyVarSubstitution::ConstrainedNumber(_)
         ) {
             false
         } else {

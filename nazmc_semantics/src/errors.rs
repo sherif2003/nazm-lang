@@ -1,7 +1,7 @@
 use std::{fmt::format, vec};
 
 use crate::{
-    ty_infer::{CompositeType, ConcreteType, PrimitiveType, Type},
+    ty_infer::{CompositeType, ConcreteType, PrimitiveType, TyVarSubstitution, Type},
     *,
 };
 
@@ -28,11 +28,17 @@ impl<'a> SemanticsAnalyzer<'a> {
         let ty = self.s.apply(ty);
         match ty.inner() {
             Type::TyVar(ty_var_key) => match &self.s.ty_vars[ty_var_key] {
-                ty_infer::TyVarSubstitution::Any => format!("_"),
-                ty_infer::TyVarSubstitution::Error => format!("_"),
-                ty_infer::TyVarSubstitution::Never => format!("!!"),
-                ty_infer::TyVarSubstitution::AnyOf(allowed) => self.fmt_con_ty(&allowed[0]),
-                ty_infer::TyVarSubstitution::Determined(determined) => self.fmt_ty(determined),
+                TyVarSubstitution::Any => format!("_"),
+                TyVarSubstitution::Error => format!("_"),
+                TyVarSubstitution::Never => format!("!!"),
+                TyVarSubstitution::ConstrainedNumber(constraints) => match constraints {
+                    ty_infer::NumberConstraints::Any
+                    | ty_infer::NumberConstraints::Signed
+                    | ty_infer::NumberConstraints::Int => format!("{{عدد}}"),
+                    ty_infer::NumberConstraints::SignedInt => format!("{{عدد صحيح}}"),
+                    ty_infer::NumberConstraints::Float => format!("{{عدد عشري}}"),
+                },
+                TyVarSubstitution::Determined(determined) => self.fmt_ty(determined),
             },
             Type::Concrete(con_ty) => self.fmt_con_ty(&con_ty),
         }
@@ -105,7 +111,6 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn fmt_prim_ty(&self, prim_ty: &PrimitiveType) -> String {
         match prim_ty {
-            PrimitiveType::Never => format!("!!"),
             PrimitiveType::Unit => format!("()"),
             PrimitiveType::I => format!("ص"),
             PrimitiveType::I1 => format!("ص1"),
