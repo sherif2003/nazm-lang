@@ -1,7 +1,7 @@
 use nazmc_diagnostics::span::SpanCursor;
 
 use crate::{
-    ty_infer::{CompositeType, ConcreteType, Type},
+    ty_infer::{CompositeType, ConcreteType, TyVarSubstitution, Type},
     typed_ast::{FieldInfo, LambdaParams},
     *,
 };
@@ -210,35 +210,19 @@ impl<'a> SemanticsAnalyzer<'a> {
                 params_types,
                 return_type,
             })) => (params_types, return_type, false),
-            _ => {
-                let params_types = args
-                    .iter()
-                    .map(|expr_key| self.s.new_ty_var())
-                    .collect::<ThinVec<_>>();
-                let return_type = self.s.new_ty_var();
-
-                if let Err(err) = self.s.constrain_type_var(
-                    &on_expr_ty,
-                    thin_vec![
-                        ConcreteType::Composite(CompositeType::FnPtr {
-                            params_types: params_types.clone(),
-                            return_type: return_type.clone()
-                        }),
-                        ConcreteType::Composite(CompositeType::Lambda {
-                            params_types: params_types.clone(),
-                            return_type: return_type.clone()
-                        }),
-                    ],
-                ) {
-                    self.add_calling_non_callable_err(
-                        &on_expr_ty,
-                        self.get_expr_span(on),
-                        parens_span,
-                    );
-                    return self.s.new_never_ty_var();
+            Type::TyVar(key) if self.s.make_ty_var_error(key) => {
+                // Infer more types to collect more errors
+                for arg in args {
+                    self.infer(*arg);
                 }
-
-                (params_types, return_type, true)
+                return on_expr_ty;
+            }
+            _ => {
+                for arg in args {
+                    self.infer(*arg);
+                }
+                self.add_calling_non_callable_err(&on_expr_ty, self.get_expr_span(on), parens_span);
+                return self.s.new_never_ty_var();
             }
         };
 
@@ -302,21 +286,10 @@ impl<'a> SemanticsAnalyzer<'a> {
             Type::Concrete(ConcreteType::Composite(CompositeType::Slice(underlying_ty))) => {
                 (underlying_ty, false)
             }
+            Type::TyVar(key) if self.s.make_ty_var_error(key) => (on_expr_ty, true),
             _ => {
-                let underlying_ty = self.s.new_ty_var();
-
-                if let Err(err) = self.s.constrain_type_var(
-                    &on_expr_ty,
-                    // Cannot constraint to array types
-                    thin_vec![ConcreteType::Composite(CompositeType::Slice(
-                        underlying_ty.clone()
-                    ))],
-                ) {
-                    self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
-                    return self.s.new_never_ty_var();
-                }
-
-                return underlying_ty;
+                self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
+                (self.s.new_never_ty_var(), true)
             }
         };
 
@@ -776,21 +749,10 @@ impl<'a> SemanticsAnalyzer<'a> {
                     | Type::Concrete(ConcreteType::Composite(CompositeType::PtrMut(
                         underlying_ty,
                     ))) => underlying_ty,
+                    Type::TyVar(key) if self.s.make_ty_var_error(key) => found_ty,
                     _ => {
-                        let underlying_ty = self.s.new_ty_var();
-
-                        if let Err(err) = self.s.constrain_type_var(
-                            &inner,
-                            thin_vec![
-                                ConcreteType::Composite(CompositeType::Ptr(underlying_ty.clone())),
-                                ConcreteType::Composite(CompositeType::PtrMut(
-                                    underlying_ty.clone()
-                                ))
-                            ],
-                        ) {
-                            self.add_cannot_deref_type(&found_ty, *expr, *op_span);
-                        }
-                        underlying_ty
+                        self.add_cannot_deref_type(&found_ty, *expr, *op_span);
+                        return self.s.new_never_ty_var();
                     }
                 }
             }

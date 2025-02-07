@@ -29,6 +29,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         match ty.inner() {
             Type::TyVar(ty_var_key) => match &self.s.ty_vars[ty_var_key] {
                 ty_infer::TyVarSubstitution::Any => format!("_"),
+                ty_infer::TyVarSubstitution::Error => format!("_"),
                 ty_infer::TyVarSubstitution::Never => format!("!!"),
                 ty_infer::TyVarSubstitution::AnyOf(allowed) => self.fmt_con_ty(&allowed[0]),
                 ty_infer::TyVarSubstitution::Determined(determined) => self.fmt_ty(determined),

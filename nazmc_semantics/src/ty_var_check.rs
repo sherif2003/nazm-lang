@@ -24,7 +24,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         match applied_ty.borrow() {
             Type::TyVar(key) => match &self.s.ty_vars[*key] {
                 ty_infer::TyVarSubstitution::Never => {}
-                ty_infer::TyVarSubstitution::Any => {
+                ty_infer::TyVarSubstitution::Any | ty_infer::TyVarSubstitution::Error => {
                     if let Some(&err_msg_idx) = self.unknown_ty_vars.get(key) {
                         if self.unknown_type_errors[err_msg_idx].2.is_none() && is_expr {
                             self.unknown_type_errors[err_msg_idx].2 = Some(span)
@@ -256,7 +256,11 @@ impl<'a> SemanticsAnalyzer<'a> {
                 if let Some(expr_key) = return_expr.expr {
                     self.check_expr_ty_vars(expr_key);
                 }
-                ExprKind::Return(return_expr)
+                ExprKind::Return(return_expr);
+
+                // Eearly return as this should has never type but it might be changed to error
+                // So the error must be reported where it is and not here
+                return;
             }
             ExprKind::TupleStruct(_) => todo!(),
             ExprKind::ArrayElemntsSized(_) => todo!(),
