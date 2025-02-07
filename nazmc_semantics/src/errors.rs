@@ -1,7 +1,7 @@
-use std::{fmt::format, vec};
+use std::vec;
 
 use crate::{
-    ty_infer::{CompositeType, ConcreteType, PrimitiveType, TyVarSubstitution, Type},
+    type_infer::{CompositeType, ConcreteType, PrimitiveType, Type, TypeVarSubstitution},
     *,
 };
 
@@ -24,21 +24,21 @@ impl<'a> SemanticsAnalyzer<'a> {
         }
     }
 
-    pub(crate) fn fmt_ty(&self, ty: &Ty) -> String {
-        let ty = self.s.apply(ty);
-        match ty.inner() {
-            Type::TyVar(ty_var_key) => match &self.s.ty_vars[ty_var_key] {
-                TyVarSubstitution::Any => format!("_"),
-                TyVarSubstitution::Error => format!("_"),
-                TyVarSubstitution::Never => format!("!!"),
-                TyVarSubstitution::ConstrainedNumber(constraints) => match constraints {
-                    ty_infer::NumberConstraints::Any
-                    | ty_infer::NumberConstraints::Signed
-                    | ty_infer::NumberConstraints::Int => format!("{{عدد}}"),
-                    ty_infer::NumberConstraints::SignedInt => format!("{{عدد صحيح}}"),
-                    ty_infer::NumberConstraints::Float => format!("{{عدد عشري}}"),
+    pub(crate) fn fmt_ty(&self, ty: &Type) -> String {
+        let ty = self.type_inf_ctx.apply(ty);
+        match ty {
+            Type::TypeVar(ty_var_key) => match &self.type_inf_ctx.ty_vars[ty_var_key] {
+                TypeVarSubstitution::Any => format!("_"),
+                TypeVarSubstitution::Error => format!("_"),
+                TypeVarSubstitution::Never => format!("!!"),
+                TypeVarSubstitution::ConstrainedNumber(constraints) => match constraints {
+                    type_infer::NumberConstraints::Any
+                    | type_infer::NumberConstraints::Signed
+                    | type_infer::NumberConstraints::Int => format!("{{عدد}}"),
+                    type_infer::NumberConstraints::SignedInt => format!("{{عدد صحيح}}"),
+                    type_infer::NumberConstraints::Float => format!("{{عدد عشري}}"),
                 },
-                TyVarSubstitution::Determined(determined) => self.fmt_ty(determined),
+                TypeVarSubstitution::Determined(determined) => self.fmt_ty(determined),
             },
             Type::Concrete(con_ty) => self.fmt_con_ty(&con_ty),
         }
@@ -180,7 +180,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_while_stm_should_return_unit_err(
         &mut self,
-        found_ty: &Ty,
+        found_ty: &Type,
         while_keyword_span: Span,
         while_scope_key: ScopeKey,
     ) {
@@ -209,8 +209,8 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_type_mismatch_in_let_stm_err(
         &mut self,
-        expected_ty: &Ty,
-        found_ty: &Ty,
+        expected_ty: &Type,
+        found_ty: &Type,
         expected_type_expr_key: TypeExprKey,
         expr_key: ExprKey,
     ) {
@@ -237,7 +237,12 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.diagnostics.push(diagnostic);
     }
 
-    pub(crate) fn add_type_mismatch_err(&mut self, expected_ty: &Ty, found_ty: &Ty, span: Span) {
+    pub(crate) fn add_type_mismatch_err(
+        &mut self,
+        expected_ty: &Type,
+        found_ty: &Type,
+        span: Span,
+    ) {
         let mut code_window = CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
         code_window.mark_error(
             span,
@@ -253,8 +258,8 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_incorrect_fn_args_err(
         &mut self,
-        expected_ty: &Ty,
-        found_ty: &Ty,
+        expected_ty: &Type,
+        found_ty: &Type,
         arg_span: Span,
         arg_idx: usize,
         call_on_expr_key: ExprKey,
@@ -359,7 +364,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_calling_non_callable_err(
         &mut self,
-        non_callable_ty: &Ty,
+        non_callable_ty: &Type,
         non_callable_span: Span,
         parens_span: Span,
     ) {
@@ -378,7 +383,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_indexing_non_indexable_err(
         &mut self,
-        non_indexable_ty: &Ty,
+        non_indexable_ty: &Type,
         on_expr_key: ExprKey,
         brackets_span: Span,
     ) {
@@ -399,8 +404,8 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_array_element_type_mismatch_err(
         &mut self,
-        expected_ty: &Ty,
-        found_ty: &Ty,
+        expected_ty: &Type,
+        found_ty: &Type,
         first_element_span: Span,
         element_span: Span,
     ) {
@@ -447,7 +452,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_indexing_non_tuple_err(
         &mut self,
-        found_ty: &Ty,
+        found_ty: &Type,
         on_expr_key: ExprKey,
         idx_span: Span,
     ) {
@@ -507,11 +512,24 @@ impl<'a> SemanticsAnalyzer<'a> {
     ) {
         let struct_info = self.ast.fields_structs[struct_key].info;
         let struct_name = self.fmt_item_name(struct_info);
-        let missing_fields_list = missing_fields
-            .iter()
-            .map(|id| format!("`{}`", self.id_pool[*id]))
-            .collect::<Vec<_>>()
-            .join("، ");
+
+        let missing_fields_msg = format!("لم يتم تعريف الحقول التالية:");
+        let mut missing_fields_list = format!("");
+
+        for (i, field_id_key) in missing_fields.iter().enumerate() {
+            missing_fields_list.push('\t');
+            missing_fields_list.push('-');
+            missing_fields_list.push(' ');
+            missing_fields_list.push_str(&self.id_pool[*field_id_key]);
+            missing_fields_list.push(':');
+            missing_fields_list.push(' ');
+            missing_fields_list.push_str(
+                &self.fmt_ty(&self.typed_ast.fields_structs[&struct_key].fields[field_id_key].typ),
+            );
+            if i < missing_fields.len() - 1 {
+                missing_fields_list.push('\n');
+            }
+        }
 
         let msg = format!("بعض الحقول مفقودة في تعريف الهيكل `{}`", struct_name);
 
@@ -522,6 +540,9 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
 
+        let mut help = Diagnostic::help(missing_fields_msg, vec![]);
+        help.chain_free_text(missing_fields_list);
+
         let note_msg = format!("تم تعريف الهيكل هنا");
         let mut note_code_window = CodeWindow::new(
             &self.files_infos[struct_info.file_key],
@@ -530,6 +551,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         note_code_window.mark_note(struct_info.id_span, vec![]);
         let note = Diagnostic::note(note_msg, vec![note_code_window]);
 
+        diagnostic.chain(help);
         diagnostic.chain(note);
         self.diagnostics.push(diagnostic);
     }
@@ -575,8 +597,8 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_field_type_mismatch_err(
         &mut self,
-        expected_ty: &Ty,
-        found_ty: &Ty,
+        expected_ty: &Type,
+        found_ty: &Type,
         struct_key: FieldsStructKey,
         field_idx: u32,
         field_id_expr_span: Span,
@@ -661,7 +683,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_branch_stm_condition_type_mismatch_err(
         &mut self,
-        found_ty: &Ty,
+        found_ty: &Type,
         keyword: &'static str,
         keyword_span: Span,
         cond_expr_key: ExprKey,
@@ -690,8 +712,8 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_type_mismatch_in_if_branches_err(
         &mut self,
-        if_ty: &Ty,
-        second_branch_ty: &Ty,
+        if_ty: &Type,
+        second_branch_ty: &Type,
         if_scope_key: ScopeKey,
         second_branch_scope_key: ScopeKey,
         if_keyword_span: Span,
@@ -748,7 +770,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_missing_else_branch_err(
         &mut self,
-        if_ty: &Ty,
+        if_ty: &Type,
         if_keyword_span: Span,
         if_scope_key: ScopeKey,
     ) {
@@ -782,7 +804,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_type_doesnt_have_fields_err(
         &mut self,
-        found_ty: &Ty,
+        found_ty: &Type,
         on_expr_key: ExprKey,
         field_name_expr: ASTId,
     ) {
@@ -804,8 +826,8 @@ impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn add_type_mismatch_in_fn_return_ty_err(
         &mut self,
         fn_key: FnKey,
-        expected_fn_return_ty: &Ty,
-        found_return_ty: &Ty,
+        expected_fn_return_ty: &Type,
+        found_return_ty: &Type,
         err_span: Span,
     ) {
         let _fn = &self.ast.fns[fn_key];
@@ -848,8 +870,8 @@ impl<'a> SemanticsAnalyzer<'a> {
     pub(crate) fn add_type_mismatch_in_lambda_return_ty_err(
         &mut self,
         lambda_scope_key: ScopeKey,
-        expteced_lambda_return_ty: &Ty,
-        found_return_ty: &Ty,
+        expteced_lambda_return_ty: &Type,
+        found_return_ty: &Type,
         span: Span,
     ) {
         let first_implicit_return_ty_span =
@@ -885,8 +907,8 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn add_type_mismatch_in_op_err(
         &mut self,
-        expected_ty: &Ty,
-        found_ty: &Ty,
+        expected_ty: &Type,
+        found_ty: &Type,
         expr_key: ExprKey,
         op_span: Span,
     ) {
@@ -899,7 +921,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             .mark_secondary(op_span, vec!["هذا المُؤثِّر".into()]);
     }
 
-    pub(crate) fn add_cannot_deref_type(&mut self, ty: &Ty, expr_key: ExprKey, op_span: Span) {
+    pub(crate) fn add_cannot_deref_type(&mut self, ty: &Type, expr_key: ExprKey, op_span: Span) {
         let expr_span = self.get_expr_span(expr_key);
         let ty = self.fmt_ty(ty);
 

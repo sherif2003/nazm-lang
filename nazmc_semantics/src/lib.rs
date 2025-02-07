@@ -1,8 +1,8 @@
 mod consts;
 mod errors;
 mod exprs;
-mod ty_infer;
-mod ty_var_check;
+mod type_infer;
+mod type_var_check;
 mod typed_ast;
 mod types;
 
@@ -15,7 +15,7 @@ use nazmc_diagnostics::{
 };
 use std::{collections::HashMap, process::exit};
 use thin_vec::ThinVec;
-use ty_infer::{CompositeType, ConcreteType, Ty, TyInfer, Type, TypeVarKey};
+use type_infer::{CompositeType, ConcreteType, Type, TypeInferenceCtx, TypeVarKey};
 use typed_ast::{LetStm, TypedAST};
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -48,9 +48,9 @@ pub struct SemanticsAnalyzer<'a> {
     cycle_stack: Vec<Diagnostic<'a>>,
     current_file_key: FileKey,
     current_fn_key: FnKey,
-    s: TyInfer,
+    type_inf_ctx: TypeInferenceCtx,
     /// For fns and lambdas only
-    current_scope_expected_return_ty: Ty,
+    current_scope_expected_return_ty: Type,
     current_lambda_first_implicit_return_ty_span: Option<Span>,
     current_lambda_scope_key: Option<ScopeKey>,
     is_inside_loop: bool,
@@ -59,7 +59,7 @@ pub struct SemanticsAnalyzer<'a> {
     unknown_ty_vars: HashMap<TypeVarKey, usize>,
     /// The error messages of unknown types,
     /// it will have a span and an optional span where that type is first used
-    unknown_type_errors: ThinVec<(Ty, Span, Option<Span>)>,
+    unknown_type_errors: ThinVec<(Type, Span, Option<Span>)>,
 }
 
 impl<'a> SemanticsAnalyzer<'a> {
@@ -103,22 +103,6 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         self.analyze_fn_bodies();
 
-        println!("Exprs types:");
-        println!("Len: {}", self.typed_ast.exprs.values().len());
-        for key in self.typed_ast.exprs.keys().sorted() {
-            let ty = &self.typed_ast.exprs[key];
-            let ty = self.s.apply(ty);
-            println!(
-                "{:?}, Ty: {}, Kind: {:?}, Type: {:?}",
-                *key,
-                self.fmt_ty(&ty),
-                self.ast.exprs[*key].kind,
-                ty.inner()
-            )
-        }
-
-        println!("{:#?}\n!!!!!!!!!!!!!!!!!!!!\n", self.s);
-
         if !self.diagnostics.is_empty() {
             eprint_diagnostics(self.diagnostics);
             exit(1);
@@ -138,13 +122,13 @@ impl<'a> SemanticsAnalyzer<'a> {
                 .collect::<ThinVec<_>>();
 
             let return_type = _fn.return_type.map_or_else(
-                || Ty::unit(),
+                || Type::unit(),
                 |type_expr_key| self.analyze_type_expr(type_expr_key).0,
             );
 
             self.typed_ast
                 .fns_signatures
-                .insert(fn_key, Ty::fn_ptr(params, return_type));
+                .insert(fn_key, Type::fn_ptr(params, return_type));
         }
 
         self.ast.fns = fns;
@@ -168,9 +152,9 @@ impl<'a> SemanticsAnalyzer<'a> {
             if let Type::Concrete(ConcreteType::Composite(CompositeType::FnPtr {
                 params_types: _,
                 return_type,
-            })) = &*self.typed_ast.fns_signatures[&fn_key].borrow()
+            })) = &self.typed_ast.fns_signatures[&fn_key]
             {
-                return_type.clone()
+                return_type.as_ref().clone()
             } else {
                 unreachable!()
             };
@@ -178,7 +162,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let found_return_ty = self.infer_scope(self.ast.fns[fn_key].scope_key);
 
         if let Err(err) = self
-            .s
+            .type_inf_ctx
             .unify(&self.current_scope_expected_return_ty, &found_return_ty)
         {
             let span = self.ast.scopes[self.ast.fns[fn_key].scope_key]
@@ -221,12 +205,12 @@ impl<'a> SemanticsAnalyzer<'a> {
         // self.s.ty_vars.clear();
     }
 
-    fn infer_scope(&mut self, scope_key: ScopeKey) -> Ty {
+    fn infer_scope(&mut self, scope_key: ScopeKey) -> Type {
         self.analyze_scope(scope_key);
 
         let return_ty = self.ast.scopes[scope_key]
             .return_expr
-            .map_or_else(|| Ty::unit(), |expr_key| self.infer(expr_key));
+            .map_or_else(|| Type::unit(), |expr_key| self.infer(expr_key));
 
         return_ty
     }
@@ -241,13 +225,13 @@ impl<'a> SemanticsAnalyzer<'a> {
                         if let Some(type_expr_key) = self.ast.lets[*let_stm_key].binding.typ {
                             self.analyze_type_expr(type_expr_key).0
                         } else {
-                            self.s.new_ty_var()
+                            self.type_inf_ctx.new_ty_var()
                         };
 
                     if let Some(expr_key) = self.ast.lets[*let_stm_key].assign {
                         let expr_ty = self.infer(expr_key);
 
-                        if let Err(err) = self.s.unify(&let_stm_type, &expr_ty) {
+                        if let Err(err) = self.type_inf_ctx.unify(&let_stm_type, &expr_ty) {
                             let expected_type_expr_key =
                                 self.ast.lets[*let_stm_key].binding.typ.unwrap();
                             self.add_type_mismatch_in_let_stm_err(
@@ -282,7 +266,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
                     let while_cond_ty = self.infer(while_cond_expr_key);
 
-                    if let Err(err) = self.s.unify(&Ty::boolean(), &while_cond_ty) {
+                    if let Err(err) = self.type_inf_ctx.unify(&Type::boolean(), &while_cond_ty) {
                         self.add_branch_stm_condition_type_mismatch_err(
                             &while_cond_ty,
                             "طالما",
@@ -297,7 +281,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
                     self.is_inside_loop = outer_is_inside_loop;
 
-                    if let Err(err) = self.s.unify(&Ty::unit(), &while_scope_ty) {
+                    if let Err(err) = self.type_inf_ctx.unify(&Type::unit(), &while_scope_ty) {
                         self.add_while_stm_should_return_unit_err(
                             &while_scope_ty,
                             while_keyword_span,
@@ -314,7 +298,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.ast.scopes[scope_key].stms = stms;
     }
 
-    fn set_bindnig_ty(&mut self, let_stm_key: LetStmKey, kind: &BindingKind, ty: &Ty) {
+    fn set_bindnig_ty(&mut self, let_stm_key: LetStmKey, kind: &BindingKind, ty: &Type) {
         match kind {
             BindingKind::Id(id) => {
                 self.typed_ast
@@ -333,8 +317,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .insert(id.id, ty.clone());
             }
             BindingKind::Tuple(kinds, span) => {
-                if let Type::Concrete(ConcreteType::Composite(CompositeType::Tuple { types })) =
-                    ty.inner()
+                if let Type::Concrete(ConcreteType::Composite(CompositeType::Tuple { types })) = ty
                 {
                     if kinds.len() == types.len() {
                         for i in 0..kinds.len() {
@@ -349,7 +332,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     }
                 } else {
                     let found_ty = self.destructed_tuple_to_ty_with_unknown(let_stm_key, &kinds);
-                    if let Err(err) = self.s.unify(ty, &found_ty) {
+                    if let Err(err) = self.type_inf_ctx.unify(ty, &found_ty) {
                         self.add_type_mismatch_err(&ty, &found_ty, *span);
                     }
                 }
@@ -361,15 +344,15 @@ impl<'a> SemanticsAnalyzer<'a> {
         &mut self,
         let_stm_key: LetStmKey,
         kinds: &[BindingKind],
-    ) -> Ty {
+    ) -> Type {
         let mut tuple_types = ThinVec::with_capacity(kinds.len());
         for i in 0..kinds.len() {
             let kind = &kinds[i];
-            let ty = self.s.new_ty_var();
+            let ty = self.type_inf_ctx.new_ty_var();
             self.set_bindnig_ty(let_stm_key, kind, &ty);
             tuple_types.push(ty);
         }
 
-        Ty::tuple(tuple_types)
+        Type::tuple(tuple_types)
     }
 }

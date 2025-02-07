@@ -1,18 +1,16 @@
 use nazmc_diagnostics::span::SpanCursor;
 
 use crate::{
-    ty_infer::{CompositeType, ConcreteType, NumberConstraints, TyVarSubstitution, Type},
+    type_infer::{CompositeType, ConcreteType, NumberConstraints},
     typed_ast::{FieldInfo, LambdaParams},
     *,
 };
 
-use thin_vec::thin_vec;
-
 impl<'a> SemanticsAnalyzer<'a> {
-    pub(crate) fn infer(&mut self, expr_key: ExprKey) -> Ty {
+    pub(crate) fn infer(&mut self, expr_key: ExprKey) -> Type {
         let kind = std::mem::take(&mut self.ast.exprs[expr_key].kind);
         let (ty, kind) = match kind {
-            ExprKind::Unit => (Ty::unit(), ExprKind::Unit),
+            ExprKind::Unit => (Type::unit(), ExprKind::Unit),
             ExprKind::Literal(lit_expr) => {
                 (self.infer_lit_expr(lit_expr), ExprKind::Literal(lit_expr))
             }
@@ -27,13 +25,13 @@ impl<'a> SemanticsAnalyzer<'a> {
             ExprKind::UnitStruct(unit_struct_path_key) => {
                 let key = self.ast.state.unit_structs_paths_exprs[unit_struct_path_key];
                 (
-                    Ty::unit_struct(key),
+                    Type::unit_struct(key),
                     ExprKind::UnitStruct(unit_struct_path_key),
                 )
             }
             ExprKind::Tuple(thin_vec) => {
                 let types = thin_vec.iter().map(|&expr_key| self.infer(expr_key));
-                (Ty::tuple(types), ExprKind::Tuple(thin_vec))
+                (Type::tuple(types), ExprKind::Tuple(thin_vec))
             }
             ExprKind::Call(call_expr) => {
                 (self.infer_call_expr(&call_expr), ExprKind::Call(call_expr))
@@ -83,7 +81,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     );
                     self.diagnostics.push(diagnostic);
                 }
-                (self.s.new_never_ty_var(), kind)
+                (self.type_inf_ctx.new_never_ty_var(), kind)
             }
             ExprKind::Return(return_expr) => (
                 self.infer_return_expr(&return_expr),
@@ -98,31 +96,31 @@ impl<'a> SemanticsAnalyzer<'a> {
         ty
     }
 
-    fn infer_lit_expr(&mut self, lit_expr: LiteralExpr) -> Ty {
+    fn infer_lit_expr(&mut self, lit_expr: LiteralExpr) -> Type {
         match lit_expr {
-            LiteralExpr::Str(_) => Ty::reference(Ty::string()),
-            LiteralExpr::Char(_) => Ty::character(),
-            LiteralExpr::Bool(_) => Ty::boolean(),
+            LiteralExpr::Str(_) => Type::reference(Type::string()),
+            LiteralExpr::Char(_) => Type::character(),
+            LiteralExpr::Bool(_) => Type::boolean(),
             LiteralExpr::Num(num_kind) => match num_kind {
-                NumKind::F4(_) => Ty::f4(),
-                NumKind::F8(_) => Ty::f8(),
-                NumKind::I(_) => Ty::i(),
-                NumKind::I1(_) => Ty::i1(),
-                NumKind::I2(_) => Ty::i2(),
-                NumKind::I4(_) => Ty::i4(),
-                NumKind::I8(_) => Ty::i8(),
-                NumKind::U(_) => Ty::u(),
-                NumKind::U1(_) => Ty::u1(),
-                NumKind::U2(_) => Ty::u2(),
-                NumKind::U4(_) => Ty::u4(),
-                NumKind::U8(_) => Ty::u8(),
-                NumKind::UnspecifiedInt(_) => self.s.new_int_ty_var(),
-                NumKind::UnspecifiedFloat(_) => self.s.new_float_ty_var(),
+                NumKind::F4(_) => Type::f4(),
+                NumKind::F8(_) => Type::f8(),
+                NumKind::I(_) => Type::i(),
+                NumKind::I1(_) => Type::i1(),
+                NumKind::I2(_) => Type::i2(),
+                NumKind::I4(_) => Type::i4(),
+                NumKind::I8(_) => Type::i8(),
+                NumKind::U(_) => Type::u(),
+                NumKind::U1(_) => Type::u1(),
+                NumKind::U2(_) => Type::u2(),
+                NumKind::U4(_) => Type::u4(),
+                NumKind::U8(_) => Type::u8(),
+                NumKind::UnspecifiedInt(_) => self.type_inf_ctx.new_int_ty_var(),
+                NumKind::UnspecifiedFloat(_) => self.type_inf_ctx.new_float_ty_var(),
             },
         }
     }
 
-    fn infer_path_no_pkg_expr(&mut self, path_no_pkg_key: PathNoPkgKey) -> Ty {
+    fn infer_path_no_pkg_expr(&mut self, path_no_pkg_key: PathNoPkgKey) -> Type {
         let item = self.ast.state.paths_no_pkgs_exprs[path_no_pkg_key];
 
         let typ = match item {
@@ -141,7 +139,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let Type::Concrete(ConcreteType::Composite(CompositeType::FnPtr {
                     params_types,
                     return_type: _,
-                })) = &*self.typed_ast.fns_signatures[&self.current_fn_key].borrow()
+                })) = &self.typed_ast.fns_signatures[&self.current_fn_key]
                 else {
                     unreachable!()
                 };
@@ -162,10 +160,10 @@ impl<'a> SemanticsAnalyzer<'a> {
         typ.clone()
     }
 
-    fn infer_path_with_pkg_expr(&mut self, path_with_pkg_key: PathWithPkgKey) -> Ty {
+    fn infer_path_with_pkg_expr(&mut self, path_with_pkg_key: PathWithPkgKey) -> Type {
         let item = self.ast.state.paths_with_pkgs_exprs[path_with_pkg_key];
 
-        let typ: &Ty = match item {
+        let typ: &Type = match item {
             Item::Const { vis: _, key } => todo!(),
             Item::Static { vis: _, key } => todo!(),
             Item::Fn { vis: _, key } => &self.typed_ast.fns_signatures[&key],
@@ -182,14 +180,14 @@ impl<'a> SemanticsAnalyzer<'a> {
             args,
             parens_span,
         }: &CallExpr,
-    ) -> Ty {
+    ) -> Type {
         let on = *on;
         let parens_span = *parens_span;
 
         let on_expr_ty = self.infer(on);
-        let on_expr_ty = self.s.apply(&on_expr_ty);
+        let on_expr_ty = self.type_inf_ctx.apply(&on_expr_ty);
 
-        let (params_types, return_type, is_fn) = match on_expr_ty.inner() {
+        let (params_types, return_type, is_fn) = match on_expr_ty {
             Type::Concrete(ConcreteType::Composite(CompositeType::FnPtr {
                 params_types,
                 return_type,
@@ -198,7 +196,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 params_types,
                 return_type,
             })) => (params_types, return_type, false),
-            Type::TyVar(key) if self.s.make_ty_var_error(key) => {
+            Type::TypeVar(key) if self.type_inf_ctx.make_ty_var_error(key) => {
                 // Infer more types to collect more errors
                 for arg in args {
                     self.infer(*arg);
@@ -210,14 +208,14 @@ impl<'a> SemanticsAnalyzer<'a> {
                     self.infer(*arg);
                 }
                 self.add_calling_non_callable_err(&on_expr_ty, self.get_expr_span(on), parens_span);
-                return self.s.new_never_ty_var();
+                return self.type_inf_ctx.new_never_ty_var();
             }
         };
 
         if params_types.len() == args.len() {
             for i in 0..args.len() {
                 let arg_ty = self.infer(args[i]);
-                if let Err(err) = self.s.unify(&params_types[i], &arg_ty) {
+                if let Err(err) = self.type_inf_ctx.unify(&params_types[i], &arg_ty) {
                     self.add_incorrect_fn_args_err(
                         &params_types[i],
                         &arg_ty,
@@ -233,7 +231,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             for i in 0..args.len() {
                 let arg_ty = self.infer(args[i]);
                 if i < params_types.len() {
-                    if let Err(err) = self.s.unify(&params_types[i], &arg_ty) {
+                    if let Err(err) = self.type_inf_ctx.unify(&params_types[i], &arg_ty) {
                         self.add_incorrect_fn_args_err(
                             &params_types[i],
                             &arg_ty,
@@ -249,7 +247,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             self.add_incorrect_fn_args_len_err(parens_span, on, true);
         }
 
-        return_type
+        *return_type
     }
 
     fn infer_idx_expr(
@@ -259,49 +257,49 @@ impl<'a> SemanticsAnalyzer<'a> {
             idx,
             brackets_span,
         }: &IdxExpr,
-    ) -> Ty {
+    ) -> Type {
         let on = *on;
         let brackets_span = *brackets_span;
 
         let on_expr_ty = self.infer(on);
-        let on_expr_ty = self.s.apply(&on_expr_ty);
+        let on_expr_ty = self.type_inf_ctx.apply(&on_expr_ty);
 
-        let (underlying_ty, is_array) = match on_expr_ty.inner() {
+        let (underlying_ty, is_array) = match on_expr_ty {
             Type::Concrete(ConcreteType::Composite(CompositeType::Array {
                 underlying_typ,
                 size: _,
-            })) => (underlying_typ, true),
+            })) => (*underlying_typ, true),
             Type::Concrete(ConcreteType::Composite(CompositeType::Slice(underlying_ty))) => {
-                (underlying_ty, false)
+                (*underlying_ty, false)
             }
-            Type::TyVar(key) if self.s.make_ty_var_error(key) => (on_expr_ty, true),
+            Type::TypeVar(key) if self.type_inf_ctx.make_ty_var_error(key) => (on_expr_ty, true),
             _ => {
                 self.add_indexing_non_indexable_err(&on_expr_ty, on, brackets_span);
-                (self.s.new_never_ty_var(), true)
+                (self.type_inf_ctx.new_never_ty_var(), true)
             }
         };
 
         let idx_ty = self.infer(*idx);
 
         // TODO: Support ranges idexing
-        if let Err(err) = self.s.unify(&Ty::u(), &idx_ty) {
-            self.add_type_mismatch_err(&Ty::u(), &idx_ty, self.get_expr_span(*idx));
+        if let Err(err) = self.type_inf_ctx.unify(&Type::u(), &idx_ty) {
+            self.add_type_mismatch_err(&Type::u(), &idx_ty, self.get_expr_span(*idx));
         }
 
         underlying_ty
     }
 
-    fn infer_array_elements(&mut self, elements: &ThinVec<ExprKey>) -> Ty {
+    fn infer_array_elements(&mut self, elements: &ThinVec<ExprKey>) -> Type {
         if elements.is_empty() {
-            let unknown_ty = self.s.new_ty_var();
-            return Ty::array(unknown_ty, 0);
+            let unknown_ty = self.type_inf_ctx.new_ty_var();
+            return Type::array(unknown_ty, 0);
         }
 
         let first_ty = self.infer(elements[0]);
 
         for &elem in &elements[1..] {
             let elem_ty = self.infer(elem);
-            if let Err(_) = self.s.unify(&first_ty, &elem_ty) {
+            if let Err(_) = self.type_inf_ctx.unify(&first_ty, &elem_ty) {
                 self.add_array_element_type_mismatch_err(
                     &first_ty,
                     &elem_ty,
@@ -311,28 +309,28 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
         }
 
-        Ty::array(first_ty, elements.len() as u32)
+        Type::array(first_ty, elements.len() as u32)
     }
 
-    fn infer_tuple_idx_expr(&mut self, TupleIdxExpr { on, idx, idx_span }: &TupleIdxExpr) -> Ty {
+    fn infer_tuple_idx_expr(&mut self, TupleIdxExpr { on, idx, idx_span }: &TupleIdxExpr) -> Type {
         let on = *on;
         let idx = *idx;
 
         let on_expr_ty = self.infer(on);
-        let on_expr_ty = self.s.apply(&on_expr_ty);
+        let on_expr_ty = self.type_inf_ctx.apply(&on_expr_ty);
 
-        match on_expr_ty.inner() {
+        match on_expr_ty {
             Type::Concrete(ConcreteType::Composite(CompositeType::Tuple { types })) => {
                 if idx < types.len() {
                     types[idx].clone()
                 } else {
                     self.add_out_of_bounds_tuple_idx_err(idx, types.len(), *idx_span);
-                    self.s.new_never_ty_var()
+                    self.type_inf_ctx.new_never_ty_var()
                 }
             }
             _ => {
                 self.add_indexing_non_tuple_err(&on_expr_ty, on, *idx_span);
-                self.s.new_never_ty_var()
+                self.type_inf_ctx.new_never_ty_var()
             }
         }
     }
@@ -344,7 +342,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             fields: fields_exprs,
         }: &FieldsStructExpr,
         expr_key: ExprKey,
-    ) -> Ty {
+    ) -> Type {
         let struct_key = self.ast.state.field_structs_paths_exprs[*path_key];
 
         let mut struct_fields = self.typed_ast.fields_structs[&struct_key].fields.clone();
@@ -367,7 +365,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 idx,
             }) = struct_fields.get(&field_id_expr.id)
             {
-                if let Err(err) = self.s.unify(&field_ty, &field_expr_ty) {
+                if let Err(err) = self.type_inf_ctx.unify(&field_ty, &field_expr_ty) {
                     self.add_field_type_mismatch_err(
                         &field_ty,
                         &field_expr_ty,
@@ -409,7 +407,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             );
         }
 
-        Ty::fields_struct(struct_key)
+        Type::fields_struct(struct_key)
     }
 
     fn check_field_is_accessible_in_current_file(
@@ -438,10 +436,10 @@ impl<'a> SemanticsAnalyzer<'a> {
             else_ifs,
             else_,
         }: &IfExpr,
-    ) -> Ty {
+    ) -> Type {
         let if_cond_ty = self.infer(*if_cond_expr_key);
 
-        if let Err(err) = self.s.unify(&Ty::boolean(), &if_cond_ty) {
+        if let Err(err) = self.type_inf_ctx.unify(&Type::boolean(), &if_cond_ty) {
             self.add_branch_stm_condition_type_mismatch_err(
                 &if_cond_ty,
                 "لو",
@@ -455,7 +453,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         for (else_if_keyword_span, else_if_cond_expr_key, else_if_scope_key) in else_ifs {
             let else_if_cond_ty = self.infer(*if_cond_expr_key);
 
-            if let Err(err) = self.s.unify(&Ty::boolean(), &else_if_cond_ty) {
+            if let Err(err) = self.type_inf_ctx.unify(&Type::boolean(), &else_if_cond_ty) {
                 self.add_branch_stm_condition_type_mismatch_err(
                     &else_if_cond_ty,
                     "وإلا لو",
@@ -466,7 +464,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
             let else_if_ty = self.infer_scope(*else_if_scope_key);
 
-            if let Err(err) = self.s.unify(&if_ty, &else_if_ty) {
+            if let Err(err) = self.type_inf_ctx.unify(&if_ty, &else_if_ty) {
                 self.add_type_mismatch_in_if_branches_err(
                     &if_ty,
                     &else_if_ty,
@@ -481,7 +479,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         if let Some((else_keyword_span, else_scope_key)) = else_ {
             let else_ty = self.infer_scope(*else_scope_key);
 
-            if let Err(err) = self.s.unify(&if_ty, &else_ty) {
+            if let Err(err) = self.type_inf_ctx.unify(&if_ty, &else_ty) {
                 self.add_type_mismatch_in_if_branches_err(
                     &if_ty,
                     &else_ty,
@@ -491,21 +489,21 @@ impl<'a> SemanticsAnalyzer<'a> {
                     *else_keyword_span,
                 );
             }
-        } else if let Err(err) = self.s.unify(&Ty::unit(), &if_ty) {
+        } else if let Err(err) = self.type_inf_ctx.unify(&Type::unit(), &if_ty) {
             self.add_missing_else_branch_err(&if_ty, *if_keyword_span, *if_scope_key);
         }
 
         if_ty
     }
 
-    fn infer_field_expr(&mut self, FieldExpr { on, name }: &FieldExpr) -> Ty {
+    fn infer_field_expr(&mut self, FieldExpr { on, name }: &FieldExpr) -> Type {
         let on = *on;
 
         let on_expr_ty = self.infer(on);
-        let on_expr_ty = self.s.apply(&on_expr_ty);
+        let on_expr_ty = self.type_inf_ctx.apply(&on_expr_ty);
 
         // TODO: Support methods and the length method on slices
-        match on_expr_ty.inner() {
+        match on_expr_ty {
             Type::Concrete(ConcreteType::FieldsStruct(struct_key)) => {
                 let struct_fields = &self.typed_ast.fields_structs[&struct_key].fields;
                 if let Some(FieldInfo {
@@ -519,12 +517,12 @@ impl<'a> SemanticsAnalyzer<'a> {
                     ty
                 } else {
                     self.add_unknown_field_in_struct_expr_err(struct_key, name.id, name.span);
-                    self.s.new_never_ty_var()
+                    self.type_inf_ctx.new_never_ty_var()
                 }
             }
             _ => {
                 self.add_type_doesnt_have_fields_err(&on_expr_ty, on, *name);
-                self.s.new_never_ty_var()
+                self.type_inf_ctx.new_never_ty_var()
             }
         }
     }
@@ -535,9 +533,9 @@ impl<'a> SemanticsAnalyzer<'a> {
             return_keyword_span,
             expr,
         }: &ReturnExpr,
-    ) -> Ty {
+    ) -> Type {
         let (found_return_ty, span) = expr.map_or_else(
-            || (Ty::unit(), *return_keyword_span),
+            || (Type::unit(), *return_keyword_span),
             |expr_key| {
                 let span = self.get_expr_span(expr_key);
                 if self.current_lambda_scope_key.is_some()
@@ -550,7 +548,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         );
 
         if let Err(err) = self
-            .s
+            .type_inf_ctx
             .unify(&self.current_scope_expected_return_ty, &found_return_ty)
         {
             if let Some(lambda_scope_key) = self.current_lambda_scope_key {
@@ -572,10 +570,10 @@ impl<'a> SemanticsAnalyzer<'a> {
             }
         }
 
-        self.s.new_never_ty_var()
+        self.type_inf_ctx.new_never_ty_var()
     }
 
-    fn infer_lambda_expr(&mut self, LambdaExpr { params, body }: &LambdaExpr) -> Ty {
+    fn infer_lambda_expr(&mut self, LambdaExpr { params, body }: &LambdaExpr) -> Type {
         let lambda_scope_key = *body;
         let curly_braces_span = self.ast.scopes[lambda_scope_key].span;
 
@@ -592,7 +590,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             let binding_ty = if let Some(type_expr_key) = typ {
                 self.analyze_type_expr(*type_expr_key).0
             } else {
-                self.s.new_ty_var()
+                self.type_inf_ctx.new_ty_var()
             };
 
             self.set_bindnig_ty_for_lambda(lambda_scope_key, &kind, &binding_ty);
@@ -604,7 +602,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let outer_lambda_first_return_ty_span = self.current_lambda_first_implicit_return_ty_span;
         let outer_scope_key = self.current_lambda_scope_key;
 
-        self.current_scope_expected_return_ty = self.s.new_ty_var();
+        self.current_scope_expected_return_ty = self.type_inf_ctx.new_ty_var();
         self.current_lambda_first_implicit_return_ty_span = None;
         self.current_lambda_scope_key = Some(lambda_scope_key);
 
@@ -613,7 +611,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         let expected_lambda_return_ty = self.current_scope_expected_return_ty.clone();
 
         if let Err(err) = self
-            .s
+            .type_inf_ctx
             .unify(&expected_lambda_return_ty, &last_expr_return_ty)
         {
             let span = if let Some(return_expr_key) = self.ast.scopes[lambda_scope_key].return_expr
@@ -634,14 +632,14 @@ impl<'a> SemanticsAnalyzer<'a> {
         self.current_lambda_first_implicit_return_ty_span = outer_lambda_first_return_ty_span;
         self.current_lambda_scope_key = outer_scope_key;
 
-        Ty::lambda(params_tys, expected_lambda_return_ty)
+        Type::lambda(params_tys, expected_lambda_return_ty)
     }
 
     fn set_bindnig_ty_for_lambda(
         &mut self,
         lambda_scope_key: ScopeKey,
         kind: &BindingKind,
-        ty: &Ty,
+        ty: &Type,
     ) {
         match kind {
             BindingKind::Id(id) => {
@@ -661,8 +659,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     .insert(id.id, ty.clone());
             }
             BindingKind::Tuple(kinds, span) => {
-                if let Type::Concrete(ConcreteType::Composite(CompositeType::Tuple { types })) =
-                    ty.inner()
+                if let Type::Concrete(ConcreteType::Composite(CompositeType::Tuple { types })) = ty
                 {
                     if kinds.len() == types.len() {
                         for i in 0..kinds.len() {
@@ -680,7 +677,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     let found_ty = self
                         .destructed_tuple_to_ty_with_unknown_for_lambda(lambda_scope_key, &kinds);
-                    if let Err(err) = self.s.unify(ty, &found_ty) {
+                    if let Err(err) = self.type_inf_ctx.unify(ty, &found_ty) {
                         self.add_type_mismatch_err(&ty, &found_ty, *span);
                     }
                 }
@@ -692,57 +689,60 @@ impl<'a> SemanticsAnalyzer<'a> {
         &mut self,
         lambda_scope_key: ScopeKey,
         kinds: &[BindingKind],
-    ) -> Ty {
+    ) -> Type {
         let mut tuple_types = ThinVec::with_capacity(kinds.len());
         for i in 0..kinds.len() {
             let kind = &kinds[i];
-            let ty = self.s.new_ty_var();
+            let ty = self.type_inf_ctx.new_ty_var();
             self.set_bindnig_ty_for_lambda(lambda_scope_key, kind, &ty);
             tuple_types.push(ty);
         }
 
-        Ty::tuple(tuple_types)
+        Type::tuple(tuple_types)
     }
 
-    fn infer_unary_op_expr(&mut self, UnaryOpExpr { op, op_span, expr }: &UnaryOpExpr) -> Ty {
+    fn infer_unary_op_expr(&mut self, UnaryOpExpr { op, op_span, expr }: &UnaryOpExpr) -> Type {
         let inner = self.infer(*expr);
 
         match op {
             UnaryOp::Minus => {
-                if let Err(err) = self.s.constrain_type_var(&inner, NumberConstraints::Signed) {
-                    self.add_type_mismatch_in_op_err(&Ty::i4(), &inner, *expr, *op_span);
-                    Ty::i4()
+                if let Err(err) = self
+                    .type_inf_ctx
+                    .constrain_type_var(&inner, NumberConstraints::Signed)
+                {
+                    self.add_type_mismatch_in_op_err(&Type::i4(), &inner, *expr, *op_span);
+                    Type::i4()
                 } else {
                     inner
                 }
             }
             UnaryOp::LNot => {
-                self.unify_with_int_num(&Ty::boolean(), *expr, &op_span);
-                Ty::boolean()
+                self.unify_with_int_num(&Type::boolean(), *expr, &op_span);
+                Type::boolean()
             }
             UnaryOp::BNot => {
                 if self.unify_with_int_num(&inner, *expr, &op_span) {
                     inner
                 } else {
-                    Ty::i4()
+                    Type::i4()
                 }
             }
             UnaryOp::Deref => {
-                let found_ty = self.s.apply(&inner);
-                match found_ty.inner() {
+                let found_ty = self.type_inf_ctx.apply(&inner);
+                match found_ty {
                     Type::Concrete(ConcreteType::Composite(CompositeType::Ptr(underlying_ty)))
                     | Type::Concrete(ConcreteType::Composite(CompositeType::PtrMut(
                         underlying_ty,
-                    ))) => underlying_ty,
-                    Type::TyVar(key) if self.s.make_ty_var_error(key) => found_ty,
+                    ))) => *underlying_ty,
+                    Type::TypeVar(key) if self.type_inf_ctx.make_ty_var_error(key) => found_ty,
                     _ => {
                         self.add_cannot_deref_type(&found_ty, *expr, *op_span);
-                        return self.s.new_never_ty_var();
+                        return self.type_inf_ctx.new_never_ty_var();
                     }
                 }
             }
-            UnaryOp::Borrow => Ty::ptr(inner),
-            UnaryOp::BorrowMut => Ty::ptr_mut(inner),
+            UnaryOp::Borrow => Type::ptr(inner),
+            UnaryOp::BorrowMut => Type::ptr_mut(inner),
         }
     }
 
@@ -754,7 +754,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             left,
             right,
         }: &BinaryOpExpr,
-    ) -> Ty {
+    ) -> Type {
         let left_ty = self.infer(*left);
 
         let op_len = match op {
@@ -804,10 +804,10 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         match op {
             BinOp::LOr | BinOp::LAnd => {
-                self.unify_with_check(&Ty::boolean(), &left_ty, *left, &op_span);
+                self.unify_with_check(&Type::boolean(), &left_ty, *left, &op_span);
                 let right_ty = self.infer(*right);
-                self.unify_with_check(&Ty::boolean(), &right_ty, *right, &op_span);
-                Ty::boolean()
+                self.unify_with_check(&Type::boolean(), &right_ty, *right, &op_span);
+                Type::boolean()
             }
             BinOp::GE | BinOp::GT | BinOp::LE | BinOp::LT => {
                 if self.unify_with_num(&left_ty, *left, &op_span) {
@@ -817,17 +817,17 @@ impl<'a> SemanticsAnalyzer<'a> {
                     let right_ty = self.infer(*right);
                     self.unify_with_num(&right_ty, *right, &op_span);
                 }
-                Ty::boolean()
+                Type::boolean()
             }
             BinOp::EqualEqual | BinOp::NotEqual => {
                 let right_ty = self.infer(*right);
                 self.unify_with_check(&left_ty, &right_ty, *right, &op_span);
-                Ty::boolean()
+                Type::boolean()
             }
             BinOp::Assign => {
                 let right_ty = self.infer(*right);
                 self.unify_with_check(&left_ty, &right_ty, *right, &op_span);
-                Ty::unit()
+                Type::unit()
             }
             BinOp::OpenOpenRange
             | BinOp::CloseOpenRange
@@ -865,7 +865,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                     let right_ty = self.infer(*right);
                     self.unify_with_int_num(&right_ty, *right, &op_span);
                 }
-                Ty::unit()
+                Type::unit()
             }
             BinOp::PlusAssign
             | BinOp::MinusAssign
@@ -879,23 +879,29 @@ impl<'a> SemanticsAnalyzer<'a> {
                     let right_ty = self.infer(*right);
                     self.unify_with_num(&right_ty, *right, &op_span);
                 }
-                Ty::unit()
+                Type::unit()
             }
         }
     }
 
-    fn unify_with_int_num(&mut self, found_ty: &Ty, expr_key: ExprKey, op_span: &Span) -> bool {
-        if let Err(err) = self.s.constrain_type_var(&found_ty, NumberConstraints::Int) {
-            self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, expr_key, *op_span);
+    fn unify_with_int_num(&mut self, found_ty: &Type, expr_key: ExprKey, op_span: &Span) -> bool {
+        if let Err(err) = self
+            .type_inf_ctx
+            .constrain_type_var(&found_ty, NumberConstraints::Int)
+        {
+            self.add_type_mismatch_in_op_err(&Type::i4(), &found_ty, expr_key, *op_span);
             false
         } else {
             true
         }
     }
 
-    fn unify_with_num(&mut self, found_ty: &Ty, expr_key: ExprKey, op_span: &Span) -> bool {
-        if let Err(err) = self.s.constrain_type_var(&found_ty, NumberConstraints::Any) {
-            self.add_type_mismatch_in_op_err(&Ty::i4(), &found_ty, expr_key, *op_span);
+    fn unify_with_num(&mut self, found_ty: &Type, expr_key: ExprKey, op_span: &Span) -> bool {
+        if let Err(err) = self
+            .type_inf_ctx
+            .constrain_type_var(&found_ty, NumberConstraints::Any)
+        {
+            self.add_type_mismatch_in_op_err(&Type::i4(), &found_ty, expr_key, *op_span);
             false
         } else {
             true
@@ -904,12 +910,12 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     fn unify_with_check(
         &mut self,
-        expected_ty: &Ty,
-        found_ty: &Ty,
+        expected_ty: &Type,
+        found_ty: &Type,
         expr_key: ExprKey,
         op_span: &Span,
     ) -> bool {
-        if let Err(err) = self.s.unify(expected_ty, found_ty) {
+        if let Err(err) = self.type_inf_ctx.unify(expected_ty, found_ty) {
             self.add_type_mismatch_in_op_err(expected_ty, &found_ty, expr_key, *op_span);
             false
         } else {

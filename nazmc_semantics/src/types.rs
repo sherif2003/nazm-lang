@@ -10,7 +10,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         type_expr_key: TypeExprKey,
         at: FileKey,
         called_from: CycleDetected,
-    ) -> (Ty, i32, u8) {
+    ) -> (Type, i32, u8) {
         let result = self.analyze_type_expr(type_expr_key);
 
         if self.semantics_stack.is_cycle_detected == CycleDetected::None {
@@ -123,7 +123,7 @@ impl<'a> SemanticsAnalyzer<'a> {
         result
     }
 
-    pub(crate) fn analyze_type_expr(&mut self, type_expr_key: TypeExprKey) -> (Ty, i32, u8) {
+    pub(crate) fn analyze_type_expr(&mut self, type_expr_key: TypeExprKey) -> (Type, i32, u8) {
         let type_expr = &self.ast.types_exprs.all[type_expr_key];
         match type_expr {
             TypeExpr::Path(path_type_expr_key) => self.analyze_path_type_expr(*path_type_expr_key),
@@ -139,13 +139,13 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let underlying_typ =
                     self.ast.types_exprs.slices[*slice_type_expr_key].underlying_typ;
                 let (type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
-                (Ty::slice(type_key), -1, 0)
+                (Type::slice(type_key), -1, 0)
             }
             TypeExpr::Ptr(ptr_type_expr_key) => {
                 let underlying_typ = self.ast.types_exprs.ptrs[*ptr_type_expr_key].underlying_typ;
                 let (underlying_type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
                 (
-                    Ty::ptr(underlying_type_key),
+                    Type::ptr(underlying_type_key),
                     Self::PTR_SIZE,
                     Self::PTR_SIZE as u8,
                 )
@@ -159,14 +159,14 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     (Self::PTR_SIZE, Self::PTR_SIZE as u8)
                 };
-                (Ty::reference(underlying_type_key), size, align)
+                (Type::reference(underlying_type_key), size, align)
             }
             TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
                 let underlying_typ =
                     self.ast.types_exprs.ptrs_mut[*ptr_mut_type_expr_key].underlying_typ;
                 let (underlying_type_key, _size, _align) = self.analyze_type_expr(underlying_typ);
                 (
-                    Ty::ptr_mut(underlying_type_key),
+                    Type::ptr_mut(underlying_type_key),
                     Self::PTR_SIZE,
                     Self::PTR_SIZE as u8,
                 )
@@ -181,13 +181,13 @@ impl<'a> SemanticsAnalyzer<'a> {
                 } else {
                     (Self::PTR_SIZE, Self::PTR_SIZE as u8)
                 };
-                (Ty::ref_mut(underlying_type_key), size, align)
+                (Type::ref_mut(underlying_type_key), size, align)
             }
         }
     }
 
     #[inline]
-    fn analyze_path_type_expr(&mut self, key: PathTypeExprKey) -> (Ty, i32, u8) {
+    fn analyze_path_type_expr(&mut self, key: PathTypeExprKey) -> (Type, i32, u8) {
         let (path_type, _span) = &self.ast.state.types_paths[key];
         match path_type {
             Item::UnitStruct { vis: _, key } => self.analyze_unit_struct(*key),
@@ -196,7 +196,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.analyze_tuple_struct(key);
                 let s = self.typed_ast.tuple_structs.get(&key).unwrap();
                 (
-                    Ty::new(Type::Concrete(ConcreteType::TupleStruct(key))),
+                    Type::Concrete(ConcreteType::TupleStruct(key)),
                     s.size as i32,
                     s.align,
                 )
@@ -207,7 +207,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 let s = self.typed_ast.fields_structs.get(&key).unwrap();
 
                 (
-                    Ty::new(Type::Concrete(ConcreteType::FieldsStruct(key))),
+                    Type::Concrete(ConcreteType::FieldsStruct(key)),
                     s.size as i32,
                     s.align,
                 )
@@ -217,29 +217,29 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     #[inline]
-    fn analyze_unit_struct(&mut self, key: UnitStructKey) -> (Ty, i32, u8) {
+    fn analyze_unit_struct(&mut self, key: UnitStructKey) -> (Type, i32, u8) {
         let info = &self.ast.unit_structs[key].info;
         let file_path = &self.files_infos[info.file_key].path;
         if file_path != "أساسي.نظم" {
-            return (Ty::unit_struct(key), 0, 0);
+            return (Type::unit_struct(key), 0, 0);
         }
 
         match info.id_key {
-            IdKey::I_TYPE => (Ty::i(), Self::PTR_SIZE, Self::PTR_SIZE as u8),
-            IdKey::I1_TYPE => (Ty::i1(), 1, 1),
-            IdKey::I2_TYPE => (Ty::i2(), 2, 2),
-            IdKey::I4_TYPE => (Ty::i4(), 4, 4),
-            IdKey::I8_TYPE => (Ty::i8(), 8, 8),
-            IdKey::U_TYPE => (Ty::u(), Self::PTR_SIZE, Self::PTR_SIZE as u8),
-            IdKey::U1_TYPE => (Ty::u1(), 1, 1),
-            IdKey::U2_TYPE => (Ty::u2(), 2, 2),
-            IdKey::U4_TYPE => (Ty::u4(), 4, 4),
-            IdKey::U8_TYPE => (Ty::u8(), 8, 8),
-            IdKey::F4_TYPE => (Ty::u4(), 4, 4),
-            IdKey::F8_TYPE => (Ty::u8(), 8, 8),
-            IdKey::BOOL_TYPE => (Ty::boolean(), 1, 1),
-            IdKey::CHAR_TYPE => (Ty::character(), 4, 4),
-            IdKey::STR_TYPE => (Ty::string(), -1, 0),
+            IdKey::I_TYPE => (Type::i(), Self::PTR_SIZE, Self::PTR_SIZE as u8),
+            IdKey::I1_TYPE => (Type::i1(), 1, 1),
+            IdKey::I2_TYPE => (Type::i2(), 2, 2),
+            IdKey::I4_TYPE => (Type::i4(), 4, 4),
+            IdKey::I8_TYPE => (Type::i8(), 8, 8),
+            IdKey::U_TYPE => (Type::u(), Self::PTR_SIZE, Self::PTR_SIZE as u8),
+            IdKey::U1_TYPE => (Type::u1(), 1, 1),
+            IdKey::U2_TYPE => (Type::u2(), 2, 2),
+            IdKey::U4_TYPE => (Type::u4(), 4, 4),
+            IdKey::U8_TYPE => (Type::u8(), 8, 8),
+            IdKey::F4_TYPE => (Type::u4(), 4, 4),
+            IdKey::F8_TYPE => (Type::u8(), 8, 8),
+            IdKey::BOOL_TYPE => (Type::boolean(), 1, 1),
+            IdKey::CHAR_TYPE => (Type::character(), 4, 4),
+            IdKey::STR_TYPE => (Type::string(), -1, 0),
             _ => unreachable!(),
         }
     }
@@ -385,11 +385,11 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     #[inline]
-    fn analyze_tuple(&mut self, key: TupleTypeExprKey) -> (Ty, i32, u8) {
+    fn analyze_tuple(&mut self, key: TupleTypeExprKey) -> (Type, i32, u8) {
         let types_len = self.ast.types_exprs.tuples[key].types.len();
 
         if types_len == 0 {
-            return (Ty::unit(), 0, 0);
+            return (Type::unit(), 0, 0);
         }
 
         let mut types = ThinVec::with_capacity(types_len);
@@ -421,11 +421,11 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         // TODO: Reorder types
 
-        (Ty::tuple(types), offset as i32, max_align)
+        (Type::tuple(types), offset as i32, max_align)
     }
 
     #[inline]
-    fn analyze_array(&mut self, key: ArrayTypeExprKey) -> (Ty, i32, u8) {
+    fn analyze_array(&mut self, key: ArrayTypeExprKey) -> (Type, i32, u8) {
         let underlying_typ = self.ast.types_exprs.arrays[key].underlying_typ;
 
         let (underlying_typ, underlying_typ_size, underlying_typ_align) =
@@ -436,7 +436,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     }
 
     #[inline]
-    fn analyze_lambda(&mut self, key: LambdaTypeExprKey) -> (Ty, i32, u8) {
+    fn analyze_lambda(&mut self, key: LambdaTypeExprKey) -> (Type, i32, u8) {
         let params_types_len = self.ast.types_exprs.lambdas[key].params_types.len();
         let mut params_types = ThinVec::with_capacity(params_types_len);
 
@@ -450,7 +450,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             .0;
 
         (
-            Ty::lambda(params_types, return_type),
+            Type::lambda(params_types, return_type),
             Self::PTR_SIZE,
             Self::PTR_SIZE as u8,
         )

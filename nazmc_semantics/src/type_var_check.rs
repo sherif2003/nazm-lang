@@ -1,11 +1,11 @@
 use crate::{
-    ty_infer::{NumberConstraints, TyVarSubstitution},
+    type_infer::{NumberConstraints, TypeVarSubstitution},
     *,
 };
 
 impl<'a> SemanticsAnalyzer<'a> {
-    pub(crate) fn ty_var_check(&mut self, base_ty: &Ty, span: Span, is_expr: bool) -> Ty {
-        let applied_ty = self.s.apply(base_ty);
+    pub(crate) fn ty_var_check(&mut self, base_ty: &Type, span: Span, is_expr: bool) -> Type {
+        let applied_ty = self.type_inf_ctx.apply(base_ty);
         self.ty_check(
             base_ty,
             &applied_ty,
@@ -18,18 +18,18 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn ty_check(
         &mut self,
-        base_ty: &Ty,
-        applied_ty: &Ty,
+        base_ty: &Type,
+        applied_ty: &Type,
         span: Span,
         possible_new_err_msg_idx: usize,
         is_expr: bool,
     ) {
-        match applied_ty.borrow() {
-            Type::TyVar(key) => match &self.s.ty_vars[*key] {
-                TyVarSubstitution::Never => {}
-                TyVarSubstitution::Any
-                | TyVarSubstitution::Error
-                | TyVarSubstitution::ConstrainedNumber(
+        match applied_ty {
+            Type::TypeVar(key) => match &self.type_inf_ctx.ty_vars[*key] {
+                TypeVarSubstitution::Never => {}
+                TypeVarSubstitution::Any
+                | TypeVarSubstitution::Error
+                | TypeVarSubstitution::ConstrainedNumber(
                     NumberConstraints::Any | NumberConstraints::Signed,
                 ) => {
                     if let Some(&err_msg_idx) = self.unknown_ty_vars.get(key) {
@@ -54,15 +54,15 @@ impl<'a> SemanticsAnalyzer<'a> {
                         self.unknown_ty_vars.insert(*key, err_msg_idx);
                     }
                 }
-                TyVarSubstitution::ConstrainedNumber(
+                TypeVarSubstitution::ConstrainedNumber(
                     NumberConstraints::Int | NumberConstraints::SignedInt,
                 ) => {
-                    self.s.ty_vars[*key] = TyVarSubstitution::Determined(Ty::i4());
+                    self.type_inf_ctx.ty_vars[*key] = TypeVarSubstitution::Determined(Type::i4());
                 }
-                TyVarSubstitution::ConstrainedNumber(NumberConstraints::Float) => {
-                    self.s.ty_vars[*key] = TyVarSubstitution::Determined(Ty::f4());
+                TypeVarSubstitution::ConstrainedNumber(NumberConstraints::Float) => {
+                    self.type_inf_ctx.ty_vars[*key] = TypeVarSubstitution::Determined(Type::f4());
                 }
-                TyVarSubstitution::Determined(determined) => self.ty_check(
+                TypeVarSubstitution::Determined(determined) => self.ty_check(
                     base_ty,
                     &determined.clone(),
                     span,
@@ -78,7 +78,7 @@ impl<'a> SemanticsAnalyzer<'a> {
 
     pub(crate) fn concrete_ty_check(
         &mut self,
-        base_ty: &Ty,
+        base_ty: &Type,
         con_ty: &ConcreteType,
         span: Span,
         possible_new_err_msg_idx: usize,
@@ -214,10 +214,12 @@ impl<'a> SemanticsAnalyzer<'a> {
                 ExprKind::If(if_expr)
             }
             ExprKind::Lambda(lambda_expr) => {
-                let Type::Concrete(ConcreteType::Composite(CompositeType::Lambda {
-                    params_types,
-                    return_type,
-                })) = self.typed_ast.exprs[&expr_key].inner()
+                let Some(
+                    ref ty @ Type::Concrete(ConcreteType::Composite(CompositeType::Lambda {
+                        ref params_types,
+                        ref return_type,
+                    })),
+                ) = self.typed_ast.exprs.remove(&expr_key)
                 else {
                     unreachable!()
                 };
@@ -225,7 +227,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 for (i, param_type) in params_types.iter().enumerate() {
                     let binding = &lambda_expr.params[i];
                     if binding.typ.is_none() {
-                        self.ty_var_check(&param_type.clone(), binding.kind.get_span(), false);
+                        self.ty_var_check(param_type, binding.kind.get_span(), false);
                     }
                 }
 
@@ -237,11 +239,8 @@ impl<'a> SemanticsAnalyzer<'a> {
                 // Which will make the second span of the unknown type error message
                 // will make it larger than the first span
 
-                let ty = &self.typed_ast.exprs[&expr_key].clone();
-
-                let ty = self.s.apply(ty);
-
-                self.typed_ast.exprs.insert(expr_key, ty.clone());
+                let ty = self.type_inf_ctx.apply(&ty);
+                self.typed_ast.exprs.insert(expr_key, ty);
 
                 self.ast.exprs[expr_key].kind = ExprKind::Lambda(lambda_expr);
 
@@ -260,7 +259,23 @@ impl<'a> SemanticsAnalyzer<'a> {
                 if let Some(expr_key) = return_expr.expr {
                     self.check_expr_ty_vars(expr_key);
                 }
-                ExprKind::Return(return_expr);
+
+                let ty = &self.typed_ast.exprs[&expr_key];
+                let ty = self.type_inf_ctx.apply(&ty);
+                self.typed_ast.exprs.insert(expr_key, ty);
+
+                self.ast.exprs[expr_key].kind = ExprKind::Return(return_expr);
+
+                // Eearly return as this should has never type but it might be changed to error
+                // So the error must be reported where it is and not here
+                return;
+            }
+            kind @ (ExprKind::Break | ExprKind::Continue) => {
+                let ty = &self.typed_ast.exprs[&expr_key];
+                let ty = self.type_inf_ctx.apply(&ty);
+                self.typed_ast.exprs.insert(expr_key, ty);
+
+                self.ast.exprs[expr_key].kind = kind;
 
                 // Eearly return as this should has never type but it might be changed to error
                 // So the error must be reported where it is and not here
@@ -274,8 +289,13 @@ impl<'a> SemanticsAnalyzer<'a> {
 
         self.ast.exprs[expr_key].kind = kind;
         let span = self.get_expr_span(expr_key);
-        let ty = &self.typed_ast.exprs[&expr_key].clone();
-        self.ty_var_check(&ty, span, true);
+
+        let Some(ty) = self.typed_ast.exprs.remove(&expr_key) else {
+            unreachable!();
+        };
+
+        let ty = self.ty_var_check(&ty, span, true);
+
         self.typed_ast.exprs.insert(expr_key, ty.clone());
     }
 }
