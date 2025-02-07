@@ -91,45 +91,6 @@ pub struct LambdaTypeExpr {
     pub params_types: ThinVec<TypeExprKey>,
     pub return_type: TypeExprKey,
     pub file_key: FileKey,
-    pub span: Span,
-}
-
-#[derive(Clone, Default)]
-pub struct Types {
-    pub all: TiVec<TypeKey, Type>,
-    pub tuples: TiVec<TupleTypeKey, TupleType>,
-    pub arrays: TiVec<ArrayTypeKey, ArrayType>,
-    pub lambdas: TiVec<LambdaTypeKey, LambdaType>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Type {
-    UnitStruct(UnitStructKey),
-    TupleStruct(TupleStructKey),
-    FieldsStruct(FieldsStructKey),
-    Slice(TypeKey),
-    Ptr(TypeKey),
-    Ref(TypeKey),
-    PtrMut(TypeKey),
-    RefMut(TypeKey),
-    Tuple(TupleTypeKey),
-    Array(ArrayTypeKey),
-    Lambda(LambdaTypeKey),
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TupleType {
-    pub types: ThinVec<TypeKey>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ArrayType {
-    pub underlying_typ: TypeKey,
-    pub size: u32,
-}
-
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct LambdaType {
-    pub params_types: ThinVec<TypeKey>,
-    pub return_type: TypeKey,
+    pub params_span: Span,
+    pub arrow_span: Span,
 }

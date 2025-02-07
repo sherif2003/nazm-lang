@@ -1,5 +1,5 @@
 use crate::*;
-use nazmc_ast::{ASTId, FileKey, ScopeKey};
+use nazmc_ast::{ASTId, ExprKind, FileKey, ReturnExpr, ScopeKey};
 use nazmc_data_pool::{typed_index_collections::TiSlice, IdKey};
 use nazmc_diagnostics::eprint_diagnostics;
 use std::{collections::HashMap, process::exit};
@@ -26,12 +26,13 @@ type FnParamsConflictsInFiles = HashMap<(IdKey, FileKey, Span), Vec<Span>>;
 //                                       |      The file key
 //                                       The conflicting param name in a file
 
-type BindingsConflicts = Vec<(IdKey, FileKey, Span)>;
-//                            ^^^^^  ^^^^^^^  ^^^^ The second span found
-//                            |      |
-//                            |      |
-//                            |      The file key
-//                            The conflicting param name in a file
+type BindingsConflicts = HashMap<(FileKey, Span), (IdKey, Span)>;
+//                                ^^^^^^   ^^^^    ^^^^   ^^^^ The second span found
+//                                |        |       |
+//                                |        |       The conflicting param name in a file
+//                                |        The first span found
+//                                The file key
+//
 
 type ItemsAndImportsConflictsInFiles = HashMap<(IdKey, FileKey), Vec<Span>>;
 //                                              ^^^^^  ^^^^^^^       ^^^^ spans found
@@ -316,7 +317,8 @@ impl<'a> ASTValidator<'a> {
                             self.ast.state.pkgs_to_items[self.pkg_key].insert(id_key, item);
                         }
                         StructKind::Fields(struct_fields) => {
-                            let mut fields = HashMap::new();
+                            let mut fields_map = HashMap::new();
+                            let mut fields = ThinVec::new();
 
                             if let Some(PunctuatedStructField {
                                 first_item,
@@ -325,18 +327,20 @@ impl<'a> ASTValidator<'a> {
                             }) = struct_fields.items
                             {
                                 let (id, field_info) = self.lower_struct_field(first_item.unwrap());
-                                fields.insert(id, field_info);
+                                fields_map.insert(id, field_info.id.span);
+                                fields.push(field_info);
 
                                 for r in rest_items {
                                     let (id, field_info) = self.lower_struct_field(r.unwrap().item);
 
-                                    if let Some(field_with_same_id) = fields.get(&id) {
+                                    if let Some(span_of_field_with_same_id) = fields_map.get(&id) {
                                         self.struct_fields_conflicts_in_files
                                             .entry((id, self.file_key, name.span))
-                                            .or_insert_with(|| vec![field_with_same_id.id_span])
-                                            .push(field_info.id_span);
+                                            .or_insert_with(|| vec![*span_of_field_with_same_id])
+                                            .push(field_info.id.span);
                                     } else {
-                                        fields.insert(id, field_info);
+                                        fields_map.insert(id, field_info.id.span);
+                                        fields.push(field_info);
                                     }
                                 }
                             }
@@ -400,26 +404,11 @@ impl<'a> ASTValidator<'a> {
                         }
                     }
 
-                    let return_type = if let Some(ColonWithType { colon: _, typ }) = f.return_type {
-                        self.lower_type(typ.unwrap())
-                    } else {
-                        let key = self.ast.types_exprs.tuples.push_and_get_key(
-                            nazmc_ast::TupleTypeExpr {
-                                types: ThinVec::new(),
-                                file_key: self.file_key,
-                                span: f.body.as_ref().unwrap().open_curly.span,
-                            },
-                        );
-
-                        let typ_expr = nazmc_ast::TypeExpr::Tuple(key);
-
-                        self.ast.types_exprs.all.push_and_get_key(typ_expr)
-                    };
+                    let return_type = f
+                        .return_type
+                        .map(|colon_with_type| self.lower_type(colon_with_type.typ.unwrap()));
 
                     let scope_key = self.lower_lambda_as_body(f.body.unwrap());
-
-                    self.ast.scopes[scope_key].extra_params =
-                        params.iter().map(|param| param.0.id).collect();
 
                     let key = self.ast.fns.push_and_get_key(nazmc_ast::Fn {
                         info,
@@ -457,7 +446,10 @@ impl<'a> ASTValidator<'a> {
                     nazmc_ast::Item::Const { key, .. } => self.ast.consts[key].info,
                     nazmc_ast::Item::Static { key, .. } => self.ast.statics[key].info,
                     nazmc_ast::Item::Fn { key, .. } => self.ast.fns[key].info,
-                    nazmc_ast::Item::Pkg | nazmc_ast::Item::LocalVar => {
+                    nazmc_ast::Item::Pkg
+                    | nazmc_ast::Item::LocalVar { .. }
+                    | nazmc_ast::Item::FnParam { .. }
+                    | nazmc_ast::Item::LambdaParam { .. } => {
                         unreachable!()
                     }
                 };
@@ -513,7 +505,10 @@ impl<'a> ASTValidator<'a> {
             field.name.data.val,
             nazmc_ast::FieldInfo {
                 vis,
-                id_span: field.name.span,
+                id: ASTId {
+                    span: field.name.span,
+                    id: field.name.data.val,
+                },
                 typ,
             },
         )
@@ -633,6 +628,12 @@ impl<'a> ASTValidator<'a> {
                     }
                 }
                 Type::Paren(paren_type) => {
+                    let span = paren_type
+                        .tuple
+                        .open_delim
+                        .span
+                        .merged_with(&paren_type.tuple.close_delim.unwrap().span);
+
                     let mut types = ThinVec::new();
 
                     let mut trailing_comma_in_types = false;
@@ -656,56 +657,18 @@ impl<'a> ASTValidator<'a> {
                     if let Some(lambda_type) = paren_type.lambda {
                         let return_type = self.lower_type(lambda_type.typ.unwrap());
 
-                        let span = match self.ast.types_exprs.all[return_type] {
-                            nazmc_ast::TypeExpr::Path(type_path_key) => {
-                                self.ast.types_exprs.paths[type_path_key].item.span
-                            }
-                            nazmc_ast::TypeExpr::Paren(paren_type_expr_key) => {
-                                self.ast.types_exprs.parens[paren_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Slice(slice_type_expr_key) => {
-                                self.ast.types_exprs.slices[slice_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Ptr(ptr_type_expr_key) => {
-                                self.ast.types_exprs.ptrs[ptr_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Ref(ref_type_expr_key) => {
-                                self.ast.types_exprs.refs[ref_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::PtrMut(ptr_mut_type_expr_key) => {
-                                self.ast.types_exprs.ptrs_mut[ptr_mut_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::RefMut(ref_mut_type_expr_key) => {
-                                self.ast.types_exprs.refs_mut[ref_mut_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Tuple(tuple_type_expr_key) => {
-                                self.ast.types_exprs.tuples[tuple_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Array(array_type_expr_key) => {
-                                self.ast.types_exprs.arrays[array_type_expr_key].span
-                            }
-                            nazmc_ast::TypeExpr::Lambda(lambda_type_expr_key) => {
-                                self.ast.types_exprs.lambdas[lambda_type_expr_key].span
-                            }
-                        };
-
                         let key = self.ast.types_exprs.lambdas.push_and_get_key(
                             nazmc_ast::LambdaTypeExpr {
                                 params_types: types,
                                 return_type,
                                 file_key: self.file_key,
-                                span,
+                                params_span: span,
+                                arrow_span: lambda_type.r_arrow.span,
                             },
                         );
 
                         nazmc_ast::TypeExpr::Lambda(key)
                     } else {
-                        let span = paren_type
-                            .tuple
-                            .open_delim
-                            .span
-                            .merged_with(&paren_type.tuple.close_delim.unwrap().span);
-
                         if !trailing_comma_in_types && types.len() == 1 {
                             let key = self.ast.types_exprs.parens.push_and_get_key(
                                 nazmc_ast::ParenTypeExpr {
@@ -776,7 +739,10 @@ impl<'a> ASTValidator<'a> {
         self.current_scope_key = self.ast.scopes.push_and_get_key(scope);
         self.ast.state.scope_events.push(ThinVec::new());
 
-        self.ast.scopes[self.current_scope_key].return_expr = Some(self.lower_expr(expr));
+        let expr_key = self.lower_expr(expr);
+        let expr_span = self.ast.exprs[expr_key].span;
+        self.ast.scopes[self.current_scope_key].return_expr = Some(expr_key);
+        self.ast.scopes[self.current_scope_key].span = expr_span;
 
         let scope_key = self.current_scope_key;
         self.current_scope_key = last_scope_key;
@@ -785,15 +751,26 @@ impl<'a> ASTValidator<'a> {
 
     #[inline]
     fn lower_lambda_as_body(&mut self, lambda: LambdaExpr) -> nazmc_ast::ScopeKey {
-        self.lower_lambda_stms_and_return_expr(lambda.stms, lambda.last_expr)
+        self.lower_lambda_stms_and_return_expr(
+            lambda.stms,
+            lambda.last_expr,
+            lambda
+                .open_curly
+                .span
+                .merged_with(&lambda.close_curly.unwrap().span),
+        )
     }
 
     fn lower_lambda_stms_and_return_expr(
         &mut self,
         stms: Vec<ParseResult<Stm>>,
         return_expr: Option<Expr>,
+        span: Span,
     ) -> nazmc_ast::ScopeKey {
-        let scope = nazmc_ast::Scope::default();
+        let scope = nazmc_ast::Scope {
+            span,
+            ..Default::default()
+        };
         let last_scope_key = self.current_scope_key;
         self.current_scope_key = self.ast.scopes.push_and_get_key(scope);
         self.ast.state.scope_events.push(ThinVec::new());
@@ -802,34 +779,44 @@ impl<'a> ASTValidator<'a> {
             let stm = match stm.unwrap() {
                 Stm::Semicolon(_) => continue,
                 Stm::Let(let_stm) => {
-                    let binding = self.lower_binding(let_stm.binding.unwrap());
+                    let mut bound_names_map = HashMap::new();
 
-                    let mut bound_names = vec![];
+                    let binding =
+                        self.lower_binding(let_stm.binding.unwrap(), &mut bound_names_map);
 
-                    nazmc_ast::expand_names_binding(&binding.kind, &mut bound_names);
-
-                    self.check_bound_names(bound_names);
-
-                    let assign = let_stm
-                        .let_assign
-                        .map(|a| Box::new(self.lower_expr(a.expr.unwrap())));
+                    let assign = let_stm.let_assign.map(|a| self.lower_expr(a.expr.unwrap()));
 
                     let let_stm = nazmc_ast::LetStm { binding, assign };
 
                     let let_stm_key = self.ast.lets.push_and_get_key(let_stm);
+
+                    self.ast.state.bound_lets_names.push(bound_names_map);
 
                     self.ast.state.scope_events[self.current_scope_key]
                         .push(nazmc_ast::ScopeEvent::Let(let_stm_key));
 
                     nazmc_ast::Stm::Let(let_stm_key)
                 }
-                Stm::While(while_stm) => nazmc_ast::Stm::While(Box::new((
-                    self.lower_expr(while_stm.conditional_block.condition.unwrap()),
-                    self.lower_lambda_as_body(while_stm.conditional_block.block.unwrap()),
-                ))),
-                Stm::If(if_expr) => nazmc_ast::Stm::If(Box::new(self.lower_if_expr(if_expr))),
+                Stm::While(while_stm) => {
+                    let cond_expr_key =
+                        self.lower_expr(while_stm.conditional_block.condition.unwrap());
+                    let scope_key =
+                        self.lower_lambda_as_body(while_stm.conditional_block.block.unwrap());
+
+                    nazmc_ast::Stm::While(Box::new(nazmc_ast::WhileStm {
+                        while_keyword_span: while_stm.while_keyword.span,
+                        cond_expr_key,
+                        scope_key,
+                    }))
+                }
+                Stm::If(if_expr) => {
+                    let span = get_if_expr_span(&if_expr);
+                    let if_expr = Box::new(self.lower_if_expr(if_expr));
+                    let expr = self.new_expr(span, nazmc_ast::ExprKind::If(if_expr));
+                    nazmc_ast::Stm::Expr(expr)
+                }
                 Stm::When(_when_expr) => todo!(),
-                Stm::Expr(stm) => nazmc_ast::Stm::Expr(Box::new(self.lower_expr(stm.expr))),
+                Stm::Expr(stm) => nazmc_ast::Stm::Expr(self.lower_expr(stm.expr)),
             };
             self.ast.scopes[self.current_scope_key].stms.push(stm);
         }
@@ -839,44 +826,71 @@ impl<'a> ASTValidator<'a> {
         self.ast.scopes[self.current_scope_key].return_expr = return_expr;
 
         let scope_key = self.current_scope_key;
+
         self.current_scope_key = last_scope_key;
+
+        self.ast.state.scope_events[self.current_scope_key]
+            .push(nazmc_ast::ScopeEvent::Scope(scope_key));
+
         scope_key
     }
 
-    fn check_bound_names(&mut self, mut bound_names: Vec<&ASTId>) {
-        bound_names.sort_by_key(|n| n.id);
-
-        bound_names
-            .chunk_by(|a, b| a.id == b.id)
-            .for_each(|chunck| {
-                if chunck.len() != 1 {
-                    self.bindings_conflicts
-                        .push((chunck[0].id, self.file_key, chunck[1].span));
-                }
-            });
-    }
-
-    fn lower_binding(&mut self, binding: Binding) -> nazmc_ast::Binding {
-        let kind = self.lower_binding_kind(binding.kind);
+    fn lower_binding(
+        &mut self,
+        binding: Binding,
+        bound_names_map: &mut HashMap<IdKey, Span>,
+    ) -> nazmc_ast::Binding {
+        let kind = self.lower_binding_kind(binding.kind, bound_names_map);
 
         let typ = binding.typ.map(|t| self.lower_type(t.typ.unwrap()));
 
         nazmc_ast::Binding { kind, typ }
     }
 
-    fn lower_binding_kind(&mut self, kind: BindingKind) -> nazmc_ast::BindingKind {
+    fn lower_binding_kind(
+        &mut self,
+        kind: BindingKind,
+        bound_names_map: &mut HashMap<IdKey, Span>,
+    ) -> nazmc_ast::BindingKind {
         match kind {
-            BindingKind::Id(id) => nazmc_ast::BindingKind::Id(nazmc_ast::ASTId {
-                span: id.span,
-                id: id.data.val,
-            }),
-            BindingKind::MutId(mut_id) => nazmc_ast::BindingKind::MutId {
-                id: nazmc_ast::ASTId {
-                    span: mut_id.id.as_ref().unwrap().span,
-                    id: mut_id.id.unwrap().data.val,
-                },
-                mut_span: mut_id.mut_keyword.span,
-            },
+            BindingKind::Id(id_token) => {
+                let id_key = id_token.data.val;
+                let id_span = id_token.span;
+
+                if let Some(first_span) = bound_names_map.get(&id_key) {
+                    self.bindings_conflicts
+                        .entry((self.file_key, *first_span))
+                        .or_insert((id_key, id_span));
+                } else {
+                    bound_names_map.insert(id_key, id_span);
+                }
+
+                nazmc_ast::BindingKind::Id(nazmc_ast::ASTId {
+                    span: id_span,
+                    id: id_key,
+                })
+            }
+            BindingKind::MutId(mut_id_binding) => {
+                let id_token = mut_id_binding.id.unwrap();
+                let id_key = id_token.data.val;
+                let id_span = id_token.span;
+
+                if let Some(first_span) = bound_names_map.get(&id_key) {
+                    self.bindings_conflicts
+                        .entry((self.file_key, *first_span))
+                        .or_insert((id_key, id_span));
+                } else {
+                    bound_names_map.insert(id_key, id_span);
+                };
+
+                nazmc_ast::BindingKind::MutId {
+                    id: nazmc_ast::ASTId {
+                        span: id_span,
+                        id: id_key,
+                    },
+                    mut_span: mut_id_binding.mut_keyword.span,
+                }
+            }
             BindingKind::Destructed(destructed_tuple) => {
                 let span = destructed_tuple
                     .open_delim
@@ -891,7 +905,7 @@ impl<'a> ASTValidator<'a> {
                     trailing_comma,
                 }) = destructed_tuple.items
                 {
-                    let first = self.lower_binding_kind(first_item.unwrap());
+                    let first = self.lower_binding_kind(first_item.unwrap(), bound_names_map);
 
                     if trailing_comma.is_none() && rest_items.is_empty() {
                         return first;
@@ -900,7 +914,7 @@ impl<'a> ASTValidator<'a> {
                     destructed_bindings.push(first);
 
                     for r in rest_items {
-                        let r = self.lower_binding_kind(r.unwrap().item);
+                        let r = self.lower_binding_kind(r.unwrap().item, bound_names_map);
                         destructed_bindings.push(r);
                     }
                 }
@@ -909,7 +923,27 @@ impl<'a> ASTValidator<'a> {
         }
     }
 
-    fn lower_expr(&mut self, expr: Expr) -> nazmc_ast::Expr {
+    fn new_expr(&mut self, span: Span, kind: ExprKind) -> nazmc_ast::ExprKey {
+        let expr = nazmc_ast::Expr { span, kind };
+        self.ast.exprs.push_and_get_key(expr)
+    }
+
+    #[inline]
+    fn get_expr_span(&self, expr_key: nazmc_ast::ExprKey) -> Span {
+        self.ast.exprs[expr_key].span
+    }
+
+    #[inline]
+    fn get_expr_merged_span(
+        &self,
+        expr_key_1: nazmc_ast::ExprKey,
+        expr_key_2: nazmc_ast::ExprKey,
+    ) -> Span {
+        self.get_expr_span(expr_key_1)
+            .merged_with(&self.get_expr_span(expr_key_2))
+    }
+
+    fn lower_expr(&mut self, expr: Expr) -> nazmc_ast::ExprKey {
         let left = self.lower_primary_expr(*expr.left);
         let mut ops_stack = ThinVec::new();
         let mut expr_stack = vec![left]; // Stack to keep track of expressions
@@ -931,15 +965,15 @@ impl<'a> ASTValidator<'a> {
                 let left_expr = expr_stack.pop().unwrap();
 
                 // Combine left and right expressions using the last operator
-                let combined_expr = nazmc_ast::Expr {
-                    span: left_expr.span.merged_with(&right_expr.span),
-                    kind: nazmc_ast::ExprKind::BinaryOp(Box::new(nazmc_ast::BinaryOpExpr {
+                let combined_expr = self.new_expr(
+                    self.get_expr_merged_span(left_expr, right_expr),
+                    nazmc_ast::ExprKind::BinaryOp(Box::new(nazmc_ast::BinaryOpExpr {
                         op: last_op,
                         op_span_cursor: last_op_span_cursor,
                         left: left_expr,
                         right: right_expr,
                     })),
-                };
+                );
 
                 expr_stack.push(combined_expr);
             }
@@ -955,15 +989,15 @@ impl<'a> ASTValidator<'a> {
             let left_expr = expr_stack.pop().unwrap();
 
             // Combine left and right expressions using the remaining operators
-            let combined_expr = nazmc_ast::Expr {
-                span: left_expr.span.merged_with(&right_expr.span),
-                kind: nazmc_ast::ExprKind::BinaryOp(Box::new(nazmc_ast::BinaryOpExpr {
+            let combined_expr = self.new_expr(
+                self.get_expr_merged_span(left_expr, right_expr),
+                nazmc_ast::ExprKind::BinaryOp(Box::new(nazmc_ast::BinaryOpExpr {
                     op: last_op,
                     op_span_cursor: last_op_span_cursor,
                     left: left_expr,
                     right: right_expr,
                 })),
-            };
+            );
 
             expr_stack.push(combined_expr);
         }
@@ -972,7 +1006,7 @@ impl<'a> ASTValidator<'a> {
         expr_stack.pop().unwrap()
     }
 
-    fn lower_primary_expr(&mut self, primary_expr: PrimaryExpr) -> nazmc_ast::Expr {
+    fn lower_primary_expr(&mut self, primary_expr: PrimaryExpr) -> nazmc_ast::ExprKey {
         let expr = match primary_expr.kind {
             PrimaryExprKind::Unary(unary_expr) => self.lower_unary_expr(unary_expr),
             PrimaryExprKind::Atomic(atomic_expr) => self.lower_atomic_expr(atomic_expr),
@@ -988,9 +1022,9 @@ impl<'a> ASTValidator<'a> {
     #[inline]
     fn lower_inner_access_expr(
         &mut self,
-        mut on: nazmc_ast::Expr,
+        mut on: nazmc_ast::ExprKey,
         inner_access_exprs: Vec<InnerAccessExpr>,
-    ) -> nazmc_ast::Expr {
+    ) -> nazmc_ast::ExprKey {
         for inner_access_expr in inner_access_exprs {
             let field = inner_access_expr.field.unwrap();
 
@@ -1001,22 +1035,19 @@ impl<'a> ASTValidator<'a> {
                         id: id.data.val,
                     };
 
-                    nazmc_ast::Expr {
-                        span: on.span.merged_with(&name.span),
-                        kind: nazmc_ast::ExprKind::Field(Box::new(nazmc_ast::FieldExpr {
-                            on,
-                            name,
-                        })),
-                    }
+                    self.new_expr(
+                        self.get_expr_span(on).merged_with(&name.span),
+                        nazmc_ast::ExprKind::Field(Box::new(nazmc_ast::FieldExpr { on, name })),
+                    )
                 }
-                InnerAccessField::TupleIdx(idx) => nazmc_ast::Expr {
-                    span: on.span.merged_with(&idx.span),
-                    kind: nazmc_ast::ExprKind::TupleIdx(Box::new(nazmc_ast::TupleIdxExpr {
+                InnerAccessField::TupleIdx(idx) => self.new_expr(
+                    self.get_expr_span(on).merged_with(&idx.span),
+                    nazmc_ast::ExprKind::TupleIdx(Box::new(nazmc_ast::TupleIdxExpr {
                         on,
                         idx: idx.data,
                         idx_span: idx.span,
                     })),
-                },
+                ),
             };
 
             on = self.lower_post_ops_exprs(expr, inner_access_expr.post_ops);
@@ -1026,18 +1057,18 @@ impl<'a> ASTValidator<'a> {
 
     fn lower_post_ops_exprs(
         &mut self,
-        mut on: nazmc_ast::Expr,
+        mut on: nazmc_ast::ExprKey,
         ops: Vec<PostOpExpr>,
-    ) -> nazmc_ast::Expr {
+    ) -> nazmc_ast::ExprKey {
         for op in ops {
-            match op {
+            on = match op {
                 PostOpExpr::Invoke(paren_expr) => {
                     let parens_span = paren_expr
                         .open_delim
                         .span
                         .merged_with(&paren_expr.close_delim.unwrap().span);
 
-                    let span = on.span.merged_with(&parens_span);
+                    let span = self.get_expr_span(on).merged_with(&parens_span);
 
                     let mut args = ThinVec::new();
 
@@ -1060,10 +1091,7 @@ impl<'a> ASTValidator<'a> {
                         parens_span,
                     };
 
-                    on = nazmc_ast::Expr {
-                        span,
-                        kind: nazmc_ast::ExprKind::Call(Box::new(call)),
-                    };
+                    self.new_expr(span, nazmc_ast::ExprKind::Call(Box::new(call)))
                 }
                 PostOpExpr::Lambda(lambda_expr) => {
                     let parens_span = lambda_expr
@@ -1071,7 +1099,7 @@ impl<'a> ASTValidator<'a> {
                         .span
                         .merged_with(&lambda_expr.close_curly.as_ref().unwrap().span);
 
-                    let span = on.span.merged_with(&parens_span);
+                    let span = self.get_expr_span(on).merged_with(&parens_span);
 
                     let mut args = ThinVec::new();
 
@@ -1083,10 +1111,7 @@ impl<'a> ASTValidator<'a> {
                         parens_span,
                     };
 
-                    on = nazmc_ast::Expr {
-                        span,
-                        kind: nazmc_ast::ExprKind::Call(Box::new(call)),
-                    };
+                    self.new_expr(span, nazmc_ast::ExprKind::Call(Box::new(call)))
                 }
                 PostOpExpr::Index(idx_expr) => {
                     let brackets_span = idx_expr
@@ -1094,7 +1119,7 @@ impl<'a> ASTValidator<'a> {
                         .span
                         .merged_with(&idx_expr.close_bracket.unwrap().span);
 
-                    let span = on.span.merged_with(&brackets_span);
+                    let span = self.get_expr_span(on).merged_with(&brackets_span);
 
                     let index = self.lower_expr(idx_expr.expr.unwrap());
 
@@ -1104,46 +1129,40 @@ impl<'a> ASTValidator<'a> {
                         brackets_span,
                     };
 
-                    on = nazmc_ast::Expr {
-                        span,
-                        kind: nazmc_ast::ExprKind::Idx(Box::new(index)),
-                    };
+                    self.new_expr(span, nazmc_ast::ExprKind::Idx(Box::new(index)))
                 }
-            }
+            };
         }
         on
     }
 
-    fn lower_unary_expr(&mut self, unary_expr: UnaryExpr) -> nazmc_ast::Expr {
+    fn lower_unary_expr(&mut self, unary_expr: UnaryExpr) -> nazmc_ast::ExprKey {
         let mut expr = self.lower_atomic_expr(unary_expr.expr.unwrap());
 
         for op in unary_expr.rest_ops.into_iter().rev() {
             let op_span = op.span;
             let op = lower_unary_op(op.data);
 
-            expr = nazmc_ast::Expr {
-                span: op_span.merged_with(&expr.span),
-                kind: nazmc_ast::ExprKind::UnaryOp(Box::new(nazmc_ast::UnaryOpExpr {
+            expr = self.new_expr(
+                op_span.merged_with(&self.get_expr_span(expr)),
+                nazmc_ast::ExprKind::UnaryOp(Box::new(nazmc_ast::UnaryOpExpr {
                     op,
                     op_span,
                     expr,
                 })),
-            }
+            );
         }
 
         let op_span = unary_expr.first_op.span;
         let op = lower_unary_op(unary_expr.first_op.data);
-        nazmc_ast::Expr {
-            span: op_span.merged_with(&expr.span),
-            kind: nazmc_ast::ExprKind::UnaryOp(Box::new(nazmc_ast::UnaryOpExpr {
-                op,
-                op_span,
-                expr,
-            })),
-        }
+
+        self.new_expr(
+            op_span.merged_with(&self.get_expr_span(expr)),
+            nazmc_ast::ExprKind::UnaryOp(Box::new(nazmc_ast::UnaryOpExpr { op, op_span, expr })),
+        )
     }
 
-    fn lower_atomic_expr(&mut self, atomic_expr: AtomicExpr) -> nazmc_ast::Expr {
+    fn lower_atomic_expr(&mut self, atomic_expr: AtomicExpr) -> nazmc_ast::ExprKey {
         match atomic_expr {
             AtomicExpr::Array(array_expr) => self.lower_array_expr(array_expr),
             AtomicExpr::Paren(paren_expr) => self.lower_paren_expr(paren_expr),
@@ -1151,44 +1170,11 @@ impl<'a> ASTValidator<'a> {
             AtomicExpr::Lambda(lambda_expr) => self.lower_lambda_expr(lambda_expr),
             AtomicExpr::When(when_expr) => self.lower_when_expr(when_expr),
             AtomicExpr::If(if_expr) => {
-                let span_end = if let Some(ref else_) = if_expr.else_cluase {
-                    &else_
-                        .block
-                        .as_ref()
-                        .unwrap()
-                        .close_curly
-                        .as_ref()
-                        .unwrap()
-                        .span
-                } else if !if_expr.else_ifs.is_empty() {
-                    &if_expr
-                        .else_ifs
-                        .last()
-                        .unwrap()
-                        .conditional_block
-                        .block
-                        .as_ref()
-                        .unwrap()
-                        .close_curly
-                        .as_ref()
-                        .unwrap()
-                        .span
-                } else {
-                    &if_expr
-                        .conditional_block
-                        .block
-                        .as_ref()
-                        .unwrap()
-                        .close_curly
-                        .as_ref()
-                        .unwrap()
-                        .span
-                };
+                let span = get_if_expr_span(&if_expr);
 
-                nazmc_ast::Expr {
-                    span: if_expr.if_keyword.span.merged_with(span_end),
-                    kind: nazmc_ast::ExprKind::If(Box::new(self.lower_if_expr(if_expr))),
-                }
+                let kind = nazmc_ast::ExprKind::If(Box::new(self.lower_if_expr(if_expr)));
+
+                self.new_expr(span, kind)
             }
             AtomicExpr::Path(simple_path) => {
                 let item_path = self.lower_simple_path(simple_path);
@@ -1227,7 +1213,7 @@ impl<'a> ASTValidator<'a> {
                     nazmc_ast::ExprKind::PathInPkg(path_key)
                 };
 
-                nazmc_ast::Expr { span, kind }
+                self.new_expr(span, kind)
             }
             AtomicExpr::Literal(lit) => {
                 let literal_expr = match lit.data {
@@ -1254,52 +1240,41 @@ impl<'a> ASTValidator<'a> {
                         nazmc_ast::LiteralExpr::Num(num_kind)
                     }
                 };
-                nazmc_ast::Expr {
-                    span: lit.span,
-                    kind: nazmc_ast::ExprKind::Literal(literal_expr),
-                }
+
+                self.new_expr(lit.span, nazmc_ast::ExprKind::Literal(literal_expr))
             }
             AtomicExpr::Return(return_expr) => {
-                let expr = return_expr.expr.map(|e| Box::new(self.lower_expr(e)));
+                let expr = return_expr.expr.map(|e| self.lower_expr(e));
 
                 let span = if let Some(e) = expr.as_ref() {
-                    return_expr.return_keyword.span.merged_with(&e.span)
+                    return_expr
+                        .return_keyword
+                        .span
+                        .merged_with(&self.get_expr_span(*e))
                 } else {
                     return_expr.return_keyword.span
                 };
 
-                nazmc_ast::Expr {
+                self.new_expr(
                     span,
-                    kind: nazmc_ast::ExprKind::Return(expr),
-                }
+                    nazmc_ast::ExprKind::Return(Box::new(ReturnExpr {
+                        return_keyword_span: return_expr.return_keyword.span,
+                        expr,
+                    })),
+                )
             }
-            AtomicExpr::Break(break_expr) => {
-                let expr = break_expr.expr.map(|e| Box::new(self.lower_expr(e)));
-
-                let span = if let Some(e) = expr.as_ref() {
-                    break_expr.break_keyword.span.merged_with(&e.span)
-                } else {
-                    break_expr.break_keyword.span
-                };
-
-                nazmc_ast::Expr {
-                    span,
-                    kind: nazmc_ast::ExprKind::Break(expr),
-                }
+            AtomicExpr::Break(break_keyword) => {
+                self.new_expr(break_keyword.span, nazmc_ast::ExprKind::Break)
             }
-            AtomicExpr::Continue(continue_expr) => nazmc_ast::Expr {
-                span: continue_expr.continue_keyword.span,
-                kind: nazmc_ast::ExprKind::Continue,
-            },
-            AtomicExpr::On(on) => nazmc_ast::Expr {
-                span: on.span,
-                kind: nazmc_ast::ExprKind::On,
-            },
+            AtomicExpr::Continue(continue_keyword) => {
+                self.new_expr(continue_keyword.span, nazmc_ast::ExprKind::Continue)
+            }
+            AtomicExpr::On(on) => self.new_expr(on.span, nazmc_ast::ExprKind::On),
         }
     }
 
     #[inline]
-    fn lower_array_expr(&mut self, array_expr: ArrayExpr) -> nazmc_ast::Expr {
+    fn lower_array_expr(&mut self, array_expr: ArrayExpr) -> nazmc_ast::ExprKey {
         let span = array_expr
             .open_bracket
             .span
@@ -1318,10 +1293,7 @@ impl<'a> ASTValidator<'a> {
                 elements.push(self.lower_expr(r.unwrap().item));
             }
 
-            nazmc_ast::Expr {
-                span,
-                kind: nazmc_ast::ExprKind::ArrayElemnts(elements),
-            }
+            self.new_expr(span, nazmc_ast::ExprKind::ArrayElemnts(elements))
         } else if let Some(ArrayExprKind::ExplicitSize(ExplicitSizeArrayExpr {
             repeated_expr,
             semicolon: _,
@@ -1332,21 +1304,20 @@ impl<'a> ASTValidator<'a> {
             let size = self.lower_expr(size_expr.unwrap());
             let array_elements_sized_expr =
                 Box::new(nazmc_ast::ArrayElementsSizedExpr { repeat, size });
-            nazmc_ast::Expr {
+
+            self.new_expr(
                 span,
-                kind: nazmc_ast::ExprKind::ArrayElemntsSized(array_elements_sized_expr),
-            }
+                nazmc_ast::ExprKind::ArrayElemntsSized(array_elements_sized_expr),
+            )
         } else {
             let elements = ThinVec::new();
-            nazmc_ast::Expr {
-                span,
-                kind: nazmc_ast::ExprKind::ArrayElemnts(elements),
-            }
+
+            self.new_expr(span, nazmc_ast::ExprKind::ArrayElemnts(elements))
         }
     }
 
     #[inline]
-    fn lower_paren_expr(&mut self, paren_expr: ParenExpr) -> nazmc_ast::Expr {
+    fn lower_paren_expr(&mut self, paren_expr: ParenExpr) -> nazmc_ast::ExprKey {
         let span = paren_expr
             .open_delim
             .span
@@ -1360,31 +1331,24 @@ impl<'a> ASTValidator<'a> {
         {
             let first = self.lower_expr(first_item.unwrap());
             if rest_items.is_empty() && trailing_comma.is_none() {
-                nazmc_ast::Expr {
-                    span,
-                    kind: nazmc_ast::ExprKind::Parens(Box::new(first)),
-                }
+                // Parentheses expression
+                first
             } else {
                 let mut exprs = ThinVec::new();
                 exprs.push(first);
                 for r in rest_items {
                     exprs.push(self.lower_expr(r.unwrap().item));
                 }
-                nazmc_ast::Expr {
-                    span,
-                    kind: nazmc_ast::ExprKind::Tuple(exprs),
-                }
+                self.new_expr(span, nazmc_ast::ExprKind::Tuple(exprs))
             }
         } else {
-            nazmc_ast::Expr {
-                span,
-                kind: nazmc_ast::ExprKind::Tuple(ThinVec::new()),
-            }
+            // Unit Expression
+            self.new_expr(span, nazmc_ast::ExprKind::Unit)
         }
     }
 
     #[inline]
-    fn lower_struct_expr(&mut self, struct_expr: StructExpr) -> nazmc_ast::Expr {
+    fn lower_struct_expr(&mut self, struct_expr: StructExpr) -> nazmc_ast::ExprKey {
         let item_path = self.lower_simple_path(struct_expr.path.unwrap());
 
         if let Some(StructInit::Tuple(tuple_struct)) = struct_expr.init {
@@ -1421,10 +1385,7 @@ impl<'a> ASTValidator<'a> {
                     args,
                 });
 
-            nazmc_ast::Expr {
-                span,
-                kind: nazmc_ast::ExprKind::TupleStruct(tuple_struct),
-            }
+            self.new_expr(span, nazmc_ast::ExprKind::TupleStruct(tuple_struct))
         } else if let Some(StructInit::Fields(fields_struct)) = struct_expr.init {
             let span = struct_expr
                 .dot
@@ -1458,10 +1419,7 @@ impl<'a> ASTValidator<'a> {
                 fields,
             });
 
-            nazmc_ast::Expr {
-                span,
-                kind: nazmc_ast::ExprKind::FieldsStruct(fields_struct),
-            }
+            self.new_expr(span, nazmc_ast::ExprKind::FieldsStruct(fields_struct))
         } else {
             let span = struct_expr.dot.span.merged_with(&item_path.item.span);
 
@@ -1472,17 +1430,14 @@ impl<'a> ASTValidator<'a> {
                 .unit_structs_paths_exprs
                 .push_and_get_key(item_path);
 
-            nazmc_ast::Expr {
-                span,
-                kind: nazmc_ast::ExprKind::UnitStruct(unit_struct_path_key),
-            }
+            self.new_expr(span, nazmc_ast::ExprKind::UnitStruct(unit_struct_path_key))
         }
     }
 
     fn lower_struct_field_expr(
         &mut self,
         e: StructFieldInitExpr,
-    ) -> (nazmc_ast::ASTId, nazmc_ast::Expr) {
+    ) -> (nazmc_ast::ASTId, nazmc_ast::ExprKey) {
         let name = nazmc_ast::ASTId {
             span: e.name.span,
             id: e.name.data.val,
@@ -1506,23 +1461,23 @@ impl<'a> ASTValidator<'a> {
             self.ast.state.scope_events[self.current_scope_key]
                 .push(nazmc_ast::ScopeEvent::Path(path_key));
 
-            nazmc_ast::Expr {
-                span: name.span,
-                kind: nazmc_ast::ExprKind::PathNoPkg(path_key),
-            }
+            self.new_expr(name.span, nazmc_ast::ExprKind::PathNoPkg(path_key))
         };
 
         (name, expr)
     }
 
     #[inline]
-    fn lower_lambda_expr(&mut self, lambda_expr: LambdaExpr) -> nazmc_ast::Expr {
+    fn lower_lambda_expr(&mut self, lambda_expr: LambdaExpr) -> nazmc_ast::ExprKey {
         let span = lambda_expr
             .open_curly
             .span
             .merged_with(&lambda_expr.close_curly.unwrap().span);
 
-        let body = self.lower_lambda_stms_and_return_expr(lambda_expr.stms, lambda_expr.last_expr);
+        let lambda_scope_key =
+            self.lower_lambda_stms_and_return_expr(lambda_expr.stms, lambda_expr.last_expr, span);
+
+        let mut bound_names_map = HashMap::new();
 
         let lambda = if let Some(arrow) = lambda_expr.lambda_arrow {
             let mut params = ThinVec::new();
@@ -1534,15 +1489,18 @@ impl<'a> ASTValidator<'a> {
                 r_arrow: _,
             }) = arrow
             {
-                let first = self.lower_binding(first);
+                let first = self.lower_binding(first, &mut bound_names_map);
                 params.push(first);
 
                 for r in rest {
-                    params.push(self.lower_binding(r.item));
+                    params.push(self.lower_binding(r.item, &mut bound_names_map));
                 }
             }
 
-            nazmc_ast::LambdaExpr { params, body }
+            nazmc_ast::LambdaExpr {
+                params,
+                body: lambda_scope_key,
+            }
         } else {
             let mut params = ThinVec::new();
             params.push(nazmc_ast::Binding {
@@ -1552,34 +1510,25 @@ impl<'a> ASTValidator<'a> {
                 }),
                 typ: None,
             });
-            nazmc_ast::LambdaExpr { params, body }
+            nazmc_ast::LambdaExpr {
+                params,
+                body: lambda_scope_key,
+            }
         };
 
-        let mut bound_names = vec![];
+        self.ast
+            .state
+            .bound_lambdas_names
+            .insert(lambda_scope_key, bound_names_map);
 
-        for param_binding in &lambda.params {
-            nazmc_ast::expand_names_binding(&param_binding.kind, &mut bound_names);
-        }
-
-        self.ast.scopes[self.current_scope_key].extra_params =
-            bound_names.iter().map(|ast_id| ast_id.id).collect();
-
-        self.check_bound_names(bound_names);
-
-        nazmc_ast::Expr {
-            span,
-            kind: nazmc_ast::ExprKind::Lambda(Box::new(lambda)),
-        }
+        self.new_expr(span, nazmc_ast::ExprKind::Lambda(Box::new(lambda)))
     }
 
     fn lower_if_expr(&mut self, if_expr: IfExpr) -> nazmc_ast::IfExpr {
         let if_condition = self.lower_expr(if_expr.conditional_block.condition.unwrap());
         let if_body = self.lower_lambda_as_body(if_expr.conditional_block.block.unwrap());
 
-        self.ast.state.scope_events[self.current_scope_key]
-            .push(nazmc_ast::ScopeEvent::Scope(if_body));
-
-        let if_ = (if_condition, if_body);
+        let if_ = (if_expr.if_keyword.span, if_condition, if_body);
 
         let mut else_ifs = ThinVec::new();
 
@@ -1587,17 +1536,19 @@ impl<'a> ASTValidator<'a> {
             let condition = self.lower_expr(else_if.conditional_block.condition.unwrap());
             let body = self.lower_lambda_as_body(else_if.conditional_block.block.unwrap());
 
-            self.ast.state.scope_events[self.current_scope_key]
-                .push(nazmc_ast::ScopeEvent::Scope(body));
-
-            else_ifs.push((condition, body));
+            else_ifs.push((
+                else_if
+                    .else_keyword
+                    .span
+                    .merged_with(&else_if.if_keyword.span),
+                condition,
+                body,
+            ));
         }
 
         let else_ = if_expr.else_cluase.map(|e| {
             let body = self.lower_lambda_as_body(e.block.unwrap());
-            self.ast.state.scope_events[self.current_scope_key]
-                .push(nazmc_ast::ScopeEvent::Scope(body));
-            body
+            (e.else_keyword.span, body)
         });
 
         nazmc_ast::IfExpr {
@@ -1607,7 +1558,7 @@ impl<'a> ASTValidator<'a> {
         }
     }
 
-    fn lower_when_expr(&mut self, _when_expr: WhenExpr) -> nazmc_ast::Expr {
+    fn lower_when_expr(&mut self, _when_expr: WhenExpr) -> nazmc_ast::ExprKey {
         todo!()
     }
 
@@ -1685,7 +1636,7 @@ impl<'a> ASTValidator<'a> {
             diagnostics.push(diagnostic);
         }
 
-        for (id_key, file_key, sec_span) in self.bindings_conflicts {
+        for ((file_key, first_span), (id_key, sec_span)) in self.bindings_conflicts {
             let file_info = &files_infos[file_key];
 
             let name = &id_pool[id_key];
@@ -1694,7 +1645,9 @@ impl<'a> ASTValidator<'a> {
 
             let mut code_window = CodeWindow::new(file_info, sec_span.start);
 
-            code_window.mark_error(sec_span, vec!["تم حجزه أكثر من مرة".to_string()]);
+            code_window.mark_secondary(first_span, vec!["تم حجز الاسم هنا أول مرة".into()]);
+
+            code_window.mark_error(sec_span, vec!["تم حجز الاسم هنا للمرة الثانية".to_string()]);
 
             let diangostic = Diagnostic::error(msg, vec![code_window]);
 
@@ -1843,4 +1796,42 @@ fn occurrences_code_window<'a>(
     }
 
     code_window
+}
+
+fn get_if_expr_span(if_expr: &IfExpr) -> Span {
+    let span_end = if let Some(ref else_) = if_expr.else_cluase {
+        &else_
+            .block
+            .as_ref()
+            .unwrap()
+            .close_curly
+            .as_ref()
+            .unwrap()
+            .span
+    } else if !if_expr.else_ifs.is_empty() {
+        &if_expr
+            .else_ifs
+            .last()
+            .unwrap()
+            .conditional_block
+            .block
+            .as_ref()
+            .unwrap()
+            .close_curly
+            .as_ref()
+            .unwrap()
+            .span
+    } else {
+        &if_expr
+            .conditional_block
+            .block
+            .as_ref()
+            .unwrap()
+            .close_curly
+            .as_ref()
+            .unwrap()
+            .span
+    };
+
+    if_expr.if_keyword.span.merged_with(span_end)
 }

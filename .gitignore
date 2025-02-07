@@ -1,5 +1,6 @@
 /docs
 /target
+/nazmc_semantics/target
 /nazmc_diagnostics/target
 /nazmc_parse_derive/target
 /nazm-book/mdbook-nazm/target

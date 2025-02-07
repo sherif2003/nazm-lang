@@ -104,13 +104,66 @@ where
     }
 }
 
+impl<K, V> Default for DataPoolBuilder<K, V>
+where
+    K: From<usize> + Into<usize>,
+    V: Eq + Hash + Clone,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type IdPool = TiVec<IdKey, String>;
 
 pub type StrPool = TiVec<StrKey, String>;
 
 impl IdKey {
     pub const EMPTY: Self = Self(0);
-    pub const UNIT: Self = Self(1);
-    pub const MAIN: Self = Self(2);
-    pub const IMPLICIT_LAMBDA_PARAM: Self = Self(3);
+    pub const UNIT: Self = Self(1); // "()"
+    pub const MAIN: Self = Self(2); // "البداية"
+    pub const IMPLICIT_LAMBDA_PARAM: Self = Self(3); // "س"
+    pub const I_TYPE: Self = Self(4); // "ص"
+    pub const I1_TYPE: Self = Self(5); // "1ص"
+    pub const I2_TYPE: Self = Self(6); // "2ص"
+    pub const I4_TYPE: Self = Self(7); // "4ص"
+    pub const I8_TYPE: Self = Self(8); // "8ص"
+    pub const U_TYPE: Self = Self(9); // "ط"
+    pub const U1_TYPE: Self = Self(10); // "1ط"
+    pub const U2_TYPE: Self = Self(11); // "2ط"
+    pub const U4_TYPE: Self = Self(12); // "4ط"
+    pub const U8_TYPE: Self = Self(13); // "8ط"
+    pub const F4_TYPE: Self = Self(14); // "4ع"
+    pub const F8_TYPE: Self = Self(15); // "ع8"
+    pub const BOOL_TYPE: Self = Self(16); // "شرط"
+    pub const CHAR_TYPE: Self = Self(17); // "حرف"
+    pub const STR_TYPE: Self = Self(18); // "متن"
+}
+
+impl IdPoolBuilder {
+    pub fn register_defined_ids(&mut self) {
+        self.get_key(&"".to_string());
+        self.get_key(&"()".to_string());
+        self.get_key(&"البداية".to_string());
+        self.get_key(&"س".to_string());
+
+        self.get_key(&"ص".to_string());
+        self.get_key(&"ص1".to_string());
+        self.get_key(&"ص2".to_string());
+        self.get_key(&"ص4".to_string());
+        self.get_key(&"ص8".to_string());
+
+        self.get_key(&"ط".to_string());
+        self.get_key(&"ط1".to_string());
+        self.get_key(&"ط2".to_string());
+        self.get_key(&"ط4".to_string());
+        self.get_key(&"ط8".to_string());
+
+        self.get_key(&"ع4".to_string());
+        self.get_key(&"ع8".to_string());
+
+        self.get_key(&"شرط".to_string());
+        self.get_key(&"حرف".to_string());
+        self.get_key(&"متن".to_string());
+    }
 }

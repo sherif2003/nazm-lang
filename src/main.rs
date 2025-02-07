@@ -14,6 +14,7 @@ use serde::Deserialize;
 use serde_yaml::Value;
 use std::io;
 use std::io::Write;
+use std::process::id;
 use std::{
     collections::HashMap,
     fs, panic,
@@ -119,16 +120,7 @@ fn main() {
     let mut str_pool = StrPoolBuilder::new();
     let mut pkgs = PkgPoolBuilder::new();
     let top_pkg_key = pkgs.get_key(&ThinVec::new());
-
-    // Register
-    // the empty string to index 0
-    // the unit type name to index 1
-    // main fn id to index 2
-    // the implicit lambda param name to index 3
-    id_pool.get_key(&"".to_string());
-    id_pool.get_key(&"()".to_string());
-    id_pool.get_key(&"البداية".to_string());
-    id_pool.get_key(&"س".to_string());
+    id_pool.register_defined_ids();
 
     let iter = files_paths
         .into_iter()
@@ -232,6 +224,15 @@ fn main() {
     ast_validator.validate(&pkgs_names, &files_infos, &id_pool);
 
     let ast = NameResolver::new(&files_infos, &id_pool, &pkgs.map, &pkgs_names, ast).resolve();
+
+    nazmc_semantics::SemanticsAnalyzer::new(
+        &files_infos,
+        &files_to_pkgs,
+        &id_pool,
+        &pkgs_names,
+        ast,
+    )
+    .analyze();
 
     // let (file_path, file_content) = cli::read_file();
 

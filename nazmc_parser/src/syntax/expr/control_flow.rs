@@ -30,17 +30,6 @@ pub(crate) struct WhenExpr {
 }
 
 #[derive(NazmcParse, Debug)]
-pub(crate) struct BreakExpr {
-    pub(crate) break_keyword: BreakKeyword,
-    pub(crate) expr: Option<Expr>,
-}
-
-#[derive(NazmcParse, Debug)]
-pub(crate) struct ContinueExpr {
-    pub(crate) continue_keyword: ContinueKeyword,
-}
-
-#[derive(NazmcParse, Debug)]
 pub(crate) struct ReturnExpr {
     pub(crate) return_keyword: ReturnKeyword,
     pub(crate) expr: Option<Expr>,

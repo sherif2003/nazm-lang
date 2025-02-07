@@ -1071,17 +1071,16 @@ impl<'a> ParseErrorsReporter<'a> {
 
     fn check_atomic_expr(&mut self, expr: &AtomicExpr) {
         match expr {
-            AtomicExpr::Literal(_) | AtomicExpr::On(_) | AtomicExpr::Continue(_) => {}
+            AtomicExpr::Literal(_)
+            | AtomicExpr::On(_)
+            | AtomicExpr::Continue(_)
+            | AtomicExpr::Break(_) => {}
             AtomicExpr::Paren(paren_expr) => self.check_paren_expr(paren_expr),
             AtomicExpr::Path(simple_path) => self.check_simple_path(simple_path),
             AtomicExpr::Lambda(lambda_expr) => self.check_lambda_expr(lambda_expr),
             AtomicExpr::If(if_expr) => self.check_if_expr(if_expr),
             AtomicExpr::When(when_expr) => self.check_when_expr(when_expr),
-            AtomicExpr::Break(BreakExpr {
-                break_keyword: _,
-                expr,
-            })
-            | AtomicExpr::Return(ReturnExpr {
+            AtomicExpr::Return(ReturnExpr {
                 return_keyword: _,
                 expr,
             }) => match &expr {

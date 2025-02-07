@@ -23,6 +23,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "clone_dyn_types"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c23e9c07455288757e5142aaeb0e999f9f34dd2d3c27c9b5f8e3f85f4cb1eda"
+
+[[package]]
 name = "convert_case"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -110,6 +116,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "iter_tools"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49a92afdf43693047a6079d379c88064970968bd6552a10f45c135a1c29e1094"
+dependencies = [
+ "clone_dyn_types",
+ "itertools 0.11.0",
+]
+
+[[package]]
+name = "itertools"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -135,6 +160,7 @@ dependencies = [
  "nazmc_lexer",
  "nazmc_parser",
  "nazmc_resolve",
+ "nazmc_semantics",
  "owo-colors",
  "serde",
  "serde_yaml",
@@ -163,7 +189,7 @@ dependencies = [
 name = "nazmc_diagnostics"
 version = "0.1.0"
 dependencies = [
- "itertools",
+ "itertools 0.13.0",
  "owo-colors",
 ]
 
@@ -172,7 +198,7 @@ name = "nazmc_lexer"
 version = "0.1.0"
 dependencies = [
  "documented",
- "itertools",
+ "itertools 0.13.0",
  "nazmc_data_pool",
  "nazmc_diagnostics",
  "strum",
@@ -205,6 +231,18 @@ dependencies = [
 name = "nazmc_resolve"
 version = "0.1.0"
 dependencies = [
+ "nazmc_ast",
+ "nazmc_data_pool",
+ "nazmc_diagnostics",
+ "thin-vec",
+]
+
+[[package]]
+name = "nazmc_semantics"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "iter_tools",
  "nazmc_ast",
  "nazmc_data_pool",
  "nazmc_diagnostics",

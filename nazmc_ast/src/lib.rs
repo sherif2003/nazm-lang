@@ -31,18 +31,15 @@ new_data_pool_key! { LambdaTypeExprKey }
 
 new_data_pool_key! { PkgKey }
 new_data_pool_key! { FileKey }
-new_data_pool_key! { TypeKey }
 new_data_pool_key! { UnitStructKey }
 new_data_pool_key! { TupleStructKey }
 new_data_pool_key! { FieldsStructKey }
-new_data_pool_key! { TupleTypeKey }
-new_data_pool_key! { ArrayTypeKey }
-new_data_pool_key! { LambdaTypeKey }
 new_data_pool_key! { ConstKey }
 new_data_pool_key! { StaticKey }
 new_data_pool_key! { FnKey }
 new_data_pool_key! { ScopeKey }
 new_data_pool_key! { LetStmKey }
+new_data_pool_key! { ExprKey }
 
 pub type PkgPoolBuilder = DataPoolBuilder<PkgKey, ThinVec<IdKey>>;
 
@@ -56,9 +53,14 @@ pub struct Unresolved {
     pub paths: ASTPaths,
     /// All scope events
     pub scope_events: TiVec<ScopeKey, ThinVec<ScopeEvent>>,
+    /// All bound names in all let stms
+    pub bound_lets_names: TiVec<LetStmKey, HashMap<IdKey, Span>>,
+    /// All bound params names in all lambda expressions scopes
+    pub bound_lambdas_names: HashMap<ScopeKey, HashMap<IdKey, Span>>,
 }
 
 /// Holds resolved paths
+#[derive(Default)]
 pub struct Resolved {
     /// The list of all unit struct expressions paths
     pub unit_structs_paths_exprs: TiVec<UnitStructPathKey, UnitStructKey>,
@@ -67,11 +69,14 @@ pub struct Resolved {
     /// The list of all fields struct expressions paths
     pub field_structs_paths_exprs: TiVec<FieldsStructPathKey, FieldsStructKey>,
     /// The list of all paths expressions that have no leading pkgs paths
+    /// which point only to local vars, statics, consts and fns
     pub paths_no_pkgs_exprs: TiVec<PathNoPkgKey, Item>,
     /// The list of all paths expressions that have leading pkgs paths
+    /// which point only to statics, consts and fns
     pub paths_with_pkgs_exprs: TiVec<PathWithPkgKey, Item>,
-    /// The list of resolved types paths expressions which point only to resolved structs
-    pub types_paths: TiVec<PathTypeExprKey, Type>,
+    /// The list of resolved types paths expressions
+    /// which point only to resolved structs
+    pub types_paths: TiVec<PathTypeExprKey, (Item, Span)>,
 }
 
 #[derive(Default)]
@@ -96,6 +101,8 @@ pub struct AST<S> {
     pub scopes: TiVec<ScopeKey, Scope>,
     /// All let stms
     pub lets: TiVec<LetStmKey, LetStm>,
+    /// All expressions
+    pub exprs: TiVec<ExprKey, Expr>,
 }
 
 impl AST<Unresolved> {
@@ -154,6 +161,18 @@ pub struct ItemPath {
     pub item: ASTId,
 }
 
+impl ItemPath {
+    pub fn get_span(&self) -> Span {
+        if let Some(span) = self.top_pkg_span {
+            span.merged_with(&self.item.span)
+        } else if let Some(span) = self.pkg_path.spans.first() {
+            span.merged_with(&self.item.span)
+        } else {
+            self.item.span
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct StarImportStm {
     pub top_pkg_span: Option<Span>,
@@ -166,53 +185,31 @@ pub struct ImportStm {
     pub alias: ASTId,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct ASTId {
     pub span: Span,
     pub id: IdKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Binding {
     pub kind: BindingKind,
     pub typ: Option<TypeExprKey>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BindingKind {
     Id(ASTId),
     MutId { id: ASTId, mut_span: Span },
     Tuple(ThinVec<BindingKind>, Span),
 }
 
-pub fn expand_names_binding<'b>(kind: &'b BindingKind, bound_names: &mut Vec<&'b ASTId>) {
-    match kind {
-        BindingKind::Id(id) => {
-            bound_names.push(id);
-        }
-        BindingKind::MutId { id, .. } => {
-            bound_names.push(id);
-        }
-        BindingKind::Tuple(bindings, ..) => {
-            for binding_kind in bindings {
-                expand_names_binding(binding_kind, bound_names);
-            }
-        }
-    }
-}
-
-pub fn expand_names_binding_owned(kind: &BindingKind, bound_names: &mut Vec<IdKey>) {
-    match kind {
-        BindingKind::Id(ast_id) => {
-            bound_names.push(ast_id.id);
-        }
-        BindingKind::MutId { id, .. } => {
-            bound_names.push(id.id);
-        }
-        BindingKind::Tuple(bindings, ..) => {
-            for binding_kind in bindings {
-                expand_names_binding_owned(binding_kind, bound_names);
-            }
+impl BindingKind {
+    pub fn get_span(&self) -> Span {
+        match self {
+            BindingKind::Id(astid) => astid.span,
+            BindingKind::MutId { id, mut_span: _ } => id.span,
+            BindingKind::Tuple(_, span) => *span,
         }
     }
 }
@@ -225,64 +222,64 @@ pub enum VisModifier {
     Private,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct ItemInfo {
     pub file_key: FileKey,
     pub id_key: IdKey,
     pub id_span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Const {
     pub info: ItemInfo,
     pub typ: TypeExprKey,
     pub expr_scope_key: ScopeKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Static {
     pub info: ItemInfo,
     pub typ: TypeExprKey,
     pub expr_scope_key: ScopeKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct UnitStruct {
     pub info: ItemInfo,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct TupleStruct {
     pub info: ItemInfo,
     pub types: ThinVec<(VisModifier, TypeExprKey)>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FieldsStruct {
     pub info: ItemInfo,
-    pub fields: HashMap<IdKey, FieldInfo>,
+    pub fields: ThinVec<FieldInfo>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct FieldInfo {
     pub vis: VisModifier,
-    pub id_span: Span,
+    pub id: ASTId,
     pub typ: TypeExprKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Fn {
     pub info: ItemInfo,
     pub params: ThinVec<(ASTId, TypeExprKey)>,
-    pub return_type: TypeExprKey,
+    pub return_type: Option<TypeExprKey>,
     pub scope_key: ScopeKey,
 }
 
 #[derive(Clone, Default)]
 pub struct Scope {
-    pub extra_params: Vec<IdKey>,
     pub stms: ThinVec<Stm>,
-    pub return_expr: Option<Expr>,
+    pub return_expr: Option<ExprKey>,
+    pub span: Span,
 }
 
 #[derive(Clone)]
@@ -295,27 +292,34 @@ pub enum ScopeEvent {
 #[derive(Clone)]
 pub enum Stm {
     Let(LetStmKey),
-    While(Box<(Expr, ScopeKey)>),
-    If(Box<IfExpr>),
-    Expr(Box<Expr>),
+    While(Box<WhileStm>),
+    Expr(ExprKey),
 }
 
 #[derive(Clone)]
 pub struct LetStm {
     pub binding: Binding,
-    pub assign: Option<Box<Expr>>,
+    pub assign: Option<ExprKey>,
 }
 
 #[derive(Clone)]
+pub struct WhileStm {
+    pub while_keyword_span: Span,
+    pub cond_expr_key: ExprKey,
+    pub scope_key: ScopeKey,
+}
+
+#[derive(Clone, Default)]
 pub struct Expr {
     pub span: Span,
     pub kind: ExprKind,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default, Debug)]
 pub enum ExprKind {
+    #[default]
+    Unit,
     Literal(LiteralExpr),
-    Parens(Box<Expr>),
     PathNoPkg(PathNoPkgKey),
     PathInPkg(PathWithPkgKey),
     Call(Box<CallExpr>),
@@ -325,20 +329,20 @@ pub enum ExprKind {
     Field(Box<FieldExpr>),
     Idx(Box<IdxExpr>),
     TupleIdx(Box<TupleIdxExpr>),
-    Tuple(ThinVec<Expr>),
-    ArrayElemnts(ThinVec<Expr>),
+    Tuple(ThinVec<ExprKey>),
+    ArrayElemnts(ThinVec<ExprKey>),
     ArrayElemntsSized(Box<ArrayElementsSizedExpr>),
     If(Box<IfExpr>),
     Lambda(Box<LambdaExpr>),
     UnaryOp(Box<UnaryOpExpr>),
     BinaryOp(Box<BinaryOpExpr>),
-    Return(Option<Box<Expr>>),
-    Break(Option<Box<Expr>>),
+    Return(Box<ReturnExpr>),
+    Break,
     Continue,
     On,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum LiteralExpr {
     Str(StrKey),
     Char(char),
@@ -346,7 +350,7 @@ pub enum LiteralExpr {
     Num(NumKind),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum NumKind {
     F4(f32),
     F8(f64),
@@ -364,72 +368,78 @@ pub enum NumKind {
     UnspecifiedFloat(f64),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CallExpr {
-    pub on: Expr,
-    pub args: ThinVec<Expr>,
+    pub on: ExprKey,
+    pub args: ThinVec<ExprKey>,
     pub parens_span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TupleStructExpr {
     pub path_key: TupleStructPathKey,
-    pub args: ThinVec<Expr>,
+    pub args: ThinVec<ExprKey>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FieldsStructExpr {
     pub path_key: FieldsStructPathKey,
-    pub fields: ThinVec<(ASTId, Expr)>,
+    pub fields: ThinVec<(ASTId, ExprKey)>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FieldExpr {
-    pub on: Expr,
+    pub on: ExprKey,
     pub name: ASTId,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TupleIdxExpr {
-    pub on: Expr,
+    pub on: ExprKey,
     pub idx: usize,
     pub idx_span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IdxExpr {
-    pub on: Expr,
-    pub idx: Expr,
+    pub on: ExprKey,
+    pub idx: ExprKey,
     pub brackets_span: Span,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ArrayElementsSizedExpr {
-    pub repeat: Expr,
-    pub size: Expr,
+    pub repeat: ExprKey,
+    pub size: ExprKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct IfExpr {
-    pub if_: (Expr, ScopeKey),
-    pub else_ifs: ThinVec<(Expr, ScopeKey)>,
-    pub else_: Option<ScopeKey>,
+    pub if_: (Span, ExprKey, ScopeKey),
+    pub else_ifs: ThinVec<(Span, ExprKey, ScopeKey)>,
+    pub else_: Option<(Span, ScopeKey)>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LambdaExpr {
     pub params: ThinVec<Binding>,
     pub body: ScopeKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+pub struct ReturnExpr {
+    pub return_keyword_span: Span,
+    pub expr: Option<ExprKey>,
+}
+
+#[derive(Clone, Debug)]
 pub struct UnaryOpExpr {
     pub op: UnaryOp,
     pub op_span: Span,
-    pub expr: Expr,
+    pub expr: ExprKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum UnaryOp {
     Minus,
     LNot,
@@ -439,15 +449,15 @@ pub enum UnaryOp {
     BorrowMut,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct BinaryOpExpr {
     pub op: BinOp,
     pub op_span_cursor: SpanCursor,
-    pub left: Expr,
-    pub right: Expr,
+    pub left: ExprKey,
+    pub right: ExprKey,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum BinOp {
     LOr,
     LAnd,
@@ -477,9 +487,9 @@ pub enum BinOp {
     TimesAssign,
     DivAssign,
     ModAssign,
-    BAndAssign,
     BOrAssign,
     XorAssign,
-    ShlAssign,
+    BAndAssign,
     ShrAssign,
+    ShlAssign,
 }

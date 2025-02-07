@@ -1,7 +1,7 @@
 use nazmc_ast::{
     ASTId, ArrayTypeExprKey, ConstKey, FieldsStructKey, FieldsStructPathKey, FileKey, FnKey, Item,
-    ItemInfo, ItemPath, PathNoPkgKey, PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath, ScopeKey,
-    StarImportStm, StaticKey, TupleStructKey, TupleStructPathKey, Type, UnitStructKey,
+    ItemInfo, ItemPath, LetStmKey, PathNoPkgKey, PathTypeExprKey, PathWithPkgKey, PkgKey, PkgPath,
+    ScopeKey, StarImportStm, StaticKey, TupleStructKey, TupleStructPathKey, UnitStructKey,
     UnitStructPathKey, VisModifier,
 };
 use nazmc_data_pool::{
@@ -112,6 +112,7 @@ impl<'a> NameResolver<'a> {
             .into_iter()
             .map(|item_path| {
                 let file_key = item_path.pkg_path.file_key;
+                let span = item_path.get_span();
 
                 let item = self
                     .resolve_item_path_from_local_file(
@@ -131,14 +132,9 @@ impl<'a> NameResolver<'a> {
                     )
                     .unwrap_or_default();
 
-                match item {
-                    Item::UnitStruct { vis: _, key } => nazmc_ast::Type::UnitStruct(key),
-                    Item::TupleStruct { vis: _, key } => nazmc_ast::Type::TupleStruct(key),
-                    Item::FieldsStruct { vis: _, key } => nazmc_ast::Type::FieldsStruct(key),
-                    _ => nazmc_ast::Type::UnitStruct(UnitStructKey::default()),
-                }
+                (item, span)
             })
-            .collect::<TiVec<PathTypeExprKey, Type>>();
+            .collect::<TiVec<PathTypeExprKey, (Item, Span)>>();
 
         let resolved_unit_structs_exprs = paths
             .unit_structs_paths_exprs
@@ -263,6 +259,7 @@ impl<'a> NameResolver<'a> {
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
+                Some(fn_key),
                 scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
@@ -281,6 +278,7 @@ impl<'a> NameResolver<'a> {
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
+                None,
                 scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
@@ -299,6 +297,7 @@ impl<'a> NameResolver<'a> {
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
+                None,
                 scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
@@ -310,13 +309,13 @@ impl<'a> NameResolver<'a> {
         let array_types_exprs_len = self.ast.types_exprs.arrays.len();
 
         for i in 0..array_types_exprs_len {
-            names_stack.clear();
             let array_type_expr_key = ArrayTypeExprKey::from(i);
             let at = self.ast.types_exprs.arrays[array_type_expr_key].file_key;
             let scope_key = self.ast.types_exprs.arrays[array_type_expr_key].size_expr_scope_key;
             self.resolve_paths_in_scope(
                 at,
                 &mut names_stack,
+                None,
                 scope_key,
                 &paths.paths_no_pkgs_exprs,
                 &mut resolved_paths_no_pkgs_exprs,
@@ -350,39 +349,99 @@ impl<'a> NameResolver<'a> {
             fns: self.ast.fns,
             scopes: self.ast.scopes,
             lets: self.ast.lets,
+            exprs: self.ast.exprs,
         }
     }
 
     fn resolve_paths_in_scope(
         &mut self,
         at: FileKey,
-        names_stack: &mut Vec<IdKey>,
+        lets_haystacks: &mut Vec<LetStmKey>,
+        fn_key: Option<FnKey>,
         scope_key: ScopeKey,
         paths: &TiSlice<PathNoPkgKey, (ASTId, PkgKey)>,
         resolved_paths: &mut TiSlice<PathNoPkgKey, Item>,
         resolved_imports: &TiSlice<FileKey, HashMap<IdKey, ResolvedImport>>,
         resolved_star_imports: &TiSlice<FileKey, ThinVec<ResolvedStarImport>>,
     ) {
-        let scope = &self.ast.scopes[scope_key];
+        let stack_start_idx = lets_haystacks.len();
 
-        for name in &scope.extra_params {
-            names_stack.push(*name);
-        }
-
+        // Scope events are in unresolved state of AST, so, there is no need to restore the ownership
         'label: for event in std::mem::take(&mut self.ast.state.scope_events[scope_key]) {
             match event {
                 nazmc_ast::ScopeEvent::Let(let_stm_key) => {
-                    let let_stm = &self.ast.lets[let_stm_key];
-                    nazmc_ast::expand_names_binding_owned(&let_stm.binding.kind, names_stack);
+                    lets_haystacks.push(let_stm_key);
                 }
                 nazmc_ast::ScopeEvent::Path(path_no_pkg_key) => {
                     let path_expr = &paths[path_no_pkg_key];
-                    for name in names_stack.iter().rev() {
-                        if *name == path_expr.0.id {
-                            resolved_paths[path_no_pkg_key] = Item::LocalVar;
+                    let needle_id_key = path_expr.0.id;
+
+                    // Iterate over names_stack in reverse, from stack_start_idx to the end.
+                    if let Some(&let_stm_key) =
+                        lets_haystacks[stack_start_idx..]
+                            .iter()
+                            .rev()
+                            .find(|&&let_stm_key| {
+                                self.ast.state.bound_lets_names[let_stm_key]
+                                    .contains_key(&needle_id_key)
+                            })
+                    {
+                        resolved_paths[path_no_pkg_key] = Item::LocalVar {
+                            id: needle_id_key,
+                            key: let_stm_key,
+                        };
+                        continue 'label;
+                    }
+
+                    // Check if current scope is a lambda expression, and then check if it contains the needle id key
+                    if self
+                        .ast
+                        .state
+                        .bound_lambdas_names
+                        .get(&scope_key)
+                        .is_some_and(|bound_lambda_names| {
+                            bound_lambda_names.contains_key(&needle_id_key)
+                        })
+                    {
+                        resolved_paths[path_no_pkg_key] = Item::LambdaParam {
+                            id: needle_id_key,
+                            scope_key,
+                        };
+                        continue 'label;
+                    }
+
+                    // Iterate over names_stack in reverse, from index `stack_start_idx - 1` to the beginning.
+                    if let Some(&let_stm_key) =
+                        lets_haystacks[..stack_start_idx]
+                            .iter()
+                            .rev()
+                            .find(|&&let_stm_key| {
+                                self.ast.state.bound_lets_names[let_stm_key]
+                                    .contains_key(&needle_id_key)
+                            })
+                    {
+                        resolved_paths[path_no_pkg_key] = Item::LocalVar {
+                            id: needle_id_key,
+                            key: let_stm_key,
+                        };
+                        continue 'label;
+                    }
+
+                    // Searching in fn params
+                    if let (Some(fn_key), 0) = (fn_key, stack_start_idx) {
+                        if let Some(idx) = self.ast.fns[fn_key]
+                            .params
+                            .iter()
+                            .position(|(ASTId { span: _, id }, _)| *id == path_expr.0.id)
+                        {
+                            resolved_paths[path_no_pkg_key] = Item::FnParam {
+                                idx: idx as u32,
+                                fn_key,
+                            };
                             continue 'label;
                         }
                     }
+
                     resolved_paths[path_no_pkg_key] = self
                         .resolve_item_path_with_no_pkg_path(
                             at,
@@ -401,22 +460,21 @@ impl<'a> NameResolver<'a> {
                         .unwrap_or_default();
                 }
                 nazmc_ast::ScopeEvent::Scope(scope_key) => {
-                    let len = names_stack.len();
-
                     self.resolve_paths_in_scope(
                         at,
-                        names_stack,
+                        lets_haystacks,
+                        fn_key,
                         scope_key,
                         paths,
                         resolved_paths,
                         resolved_imports,
                         resolved_star_imports,
                     );
-
-                    names_stack.truncate(len);
                 }
             }
         }
+
+        lets_haystacks.truncate(stack_start_idx);
     }
 
     fn resolve_non_pkg_item_path(
@@ -812,10 +870,19 @@ impl<'a> NameResolver<'a> {
         let mut code_window = CodeWindow::new(file_info, at_span.start);
         code_window.mark_error(at_span, vec![]);
 
-        let help = self.help_diagnostic_to_find_item(item);
-
         let mut diagnostic = Diagnostic::error(msg, vec![code_window]);
-        diagnostic.chain(help);
+
+        if !matches!(
+            item,
+            Item::Pkg
+                | Item::LocalVar { .. }
+                | Item::FnParam { .. }
+                | nazmc_ast::Item::LambdaParam { .. }
+        ) {
+            let help = self.help_diagnostic_to_find_item(item);
+            diagnostic.chain(help);
+        }
+
         self.diagnostics.push(diagnostic);
     }
 
@@ -955,7 +1022,7 @@ impl<'a> NameResolver<'a> {
                 "لا يمكن الوصول إلى الدالة `{}` لأنها خاصة بالحزمة التابعة لها",
                 name
             ),
-            Item::Pkg | Item::LocalVar => {
+            _ => {
                 unreachable!()
             }
         };
@@ -994,13 +1061,16 @@ impl<'a> NameResolver<'a> {
 
     fn get_item_info(&self, item: Item) -> ItemInfo {
         match item {
-            nazmc_ast::Item::UnitStruct { key, .. } => self.ast.unit_structs[key].info,
-            nazmc_ast::Item::TupleStruct { key, .. } => self.ast.tuple_structs[key].info,
-            nazmc_ast::Item::FieldsStruct { key, .. } => self.ast.fields_structs[key].info,
-            nazmc_ast::Item::Const { key, .. } => self.ast.consts[key].info,
-            nazmc_ast::Item::Static { key, .. } => self.ast.statics[key].info,
-            nazmc_ast::Item::Fn { key, .. } => self.ast.fns[key].info,
-            nazmc_ast::Item::Pkg | nazmc_ast::Item::LocalVar => {
+            Item::UnitStruct { key, .. } => self.ast.unit_structs[key].info,
+            Item::TupleStruct { key, .. } => self.ast.tuple_structs[key].info,
+            Item::FieldsStruct { key, .. } => self.ast.fields_structs[key].info,
+            Item::Const { key, .. } => self.ast.consts[key].info,
+            Item::Static { key, .. } => self.ast.statics[key].info,
+            Item::Fn { key, .. } => self.ast.fns[key].info,
+            Item::Pkg
+            | Item::LocalVar { .. }
+            | Item::FnParam { .. }
+            | nazmc_ast::Item::LambdaParam { .. } => {
                 unreachable!()
             }
         }
@@ -1023,7 +1093,9 @@ fn item_kind_to_str(item: Item) -> &'static str {
         Item::Const { .. } => "ثابت",
         Item::Static { .. } => "مشترك",
         Item::Fn { .. } => "دالة",
-        Item::LocalVar => unreachable!(),
+        Item::LocalVar { .. } | Item::FnParam { .. } | nazmc_ast::Item::LambdaParam { .. } => {
+            unreachable!()
+        }
     }
 }
 
@@ -1036,6 +1108,8 @@ fn explicit_item_kind_to_str(item: Item) -> &'static str {
         Item::Const { .. } => "ثابت",
         Item::Static { .. } => "مشترك",
         Item::Fn { .. } => "دالة",
-        Item::LocalVar => unreachable!(),
+        Item::LocalVar { .. } | Item::FnParam { .. } | nazmc_ast::Item::LambdaParam { .. } => {
+            unreachable!()
+        }
     }
 }
