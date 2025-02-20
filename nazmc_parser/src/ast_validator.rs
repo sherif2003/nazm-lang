@@ -40,6 +40,10 @@ type ItemsAndImportsConflictsInFiles = HashMap<(IdKey, FileKey), Vec<Span>>;
 //                                              |      The file key
 //                                              The conflicting name in a file
 
+type ReturnOutsideFnBody = Vec<(FileKey, Span)>;
+type BreakOutsideLoopBody = Vec<(FileKey, Span)>;
+type ContinueOutsideLoopBody = Vec<(FileKey, Span)>;
+
 pub struct ASTValidator<'a> {
     pub(crate) pkg_key: PkgKey,
     pub(crate) file_key: FileKey,
@@ -51,6 +55,12 @@ pub struct ASTValidator<'a> {
     pub(crate) fn_params_conflicts_in_files: FnParamsConflictsInFiles,
     pub(crate) bindings_conflicts: BindingsConflicts,
     pub(crate) items_and_imports_conflicts_in_files: ItemsAndImportsConflictsInFiles,
+    pub(crate) return_outside_fn_body_errs: ReturnOutsideFnBody,
+    pub(crate) break_outside_loop_body_errs: BreakOutsideLoopBody,
+    pub(crate) continue_outside_loop_body_errs: ContinueOutsideLoopBody,
+    pub(crate) current_fn_scope_key: Option<ScopeKey>,
+    pub(crate) current_lambda_scope_key: Option<ScopeKey>,
+    pub(crate) current_loop_scope_key: Option<ScopeKey>,
     pub(crate) current_scope_key: ScopeKey,
 }
 
@@ -67,6 +77,12 @@ impl<'a> ASTValidator<'a> {
             fn_params_conflicts_in_files: Default::default(),
             bindings_conflicts: Default::default(),
             items_and_imports_conflicts_in_files: Default::default(),
+            return_outside_fn_body_errs: Default::default(),
+            break_outside_loop_body_errs: Default::default(),
+            continue_outside_loop_body_errs: Default::default(),
+            current_fn_scope_key: Default::default(),
+            current_lambda_scope_key: Default::default(),
+            current_loop_scope_key: Default::default(),
             current_scope_key: Default::default(),
         }
     }
@@ -408,7 +424,11 @@ impl<'a> ASTValidator<'a> {
                         .return_type
                         .map(|colon_with_type| self.lower_type(colon_with_type.typ.unwrap()));
 
+                    self.current_fn_scope_key = Some(ScopeKey::from(self.ast.scopes.len()));
+
                     let scope_key = self.lower_lambda_as_body(f.body.unwrap());
+
+                    self.current_fn_scope_key = None;
 
                     let key = self.ast.fns.push_and_get_key(nazmc_ast::Fn {
                         info,
@@ -800,8 +820,15 @@ impl<'a> ASTValidator<'a> {
                 Stm::While(while_stm) => {
                     let cond_expr_key =
                         self.lower_expr(while_stm.conditional_block.condition.unwrap());
+
+                    let outter_loop_scope_key = self.current_loop_scope_key;
+
+                    self.current_loop_scope_key = Some(ScopeKey::from(self.ast.scopes.len()));
+
                     let scope_key =
                         self.lower_lambda_as_body(while_stm.conditional_block.block.unwrap());
+
+                    self.current_loop_scope_key = outter_loop_scope_key;
 
                     nazmc_ast::Stm::While(Box::new(nazmc_ast::WhileStm {
                         while_keyword_span: while_stm.while_keyword.span,
@@ -1255,19 +1282,50 @@ impl<'a> ASTValidator<'a> {
                     return_expr.return_keyword.span
                 };
 
-                self.new_expr(
-                    span,
-                    nazmc_ast::ExprKind::Return(Box::new(ReturnExpr {
-                        return_keyword_span: return_expr.return_keyword.span,
-                        expr,
-                    })),
-                )
+                let return_scope = if let Some(lambda_scope_key) = self.current_lambda_scope_key {
+                    lambda_scope_key
+                } else if let Some(fn_scope_key) = self.current_fn_scope_key {
+                    fn_scope_key
+                } else {
+                    self.return_outside_fn_body_errs.push((self.file_key, span));
+                    Default::default()
+                };
+
+                let return_expr = Box::new(ReturnExpr {
+                    return_scope,
+                    return_keyword_span: return_expr.return_keyword.span,
+                    expr,
+                });
+
+                self.new_expr(span, nazmc_ast::ExprKind::Return(return_expr))
             }
             AtomicExpr::Break(break_keyword) => {
-                self.new_expr(break_keyword.span, nazmc_ast::ExprKind::Break)
+                let loop_scope_key = if let Some(loop_scope_key) = self.current_loop_scope_key {
+                    loop_scope_key
+                } else {
+                    self.break_outside_loop_body_errs
+                        .push((self.file_key, break_keyword.span));
+                    Default::default()
+                };
+
+                self.new_expr(
+                    break_keyword.span,
+                    nazmc_ast::ExprKind::Break(loop_scope_key),
+                )
             }
             AtomicExpr::Continue(continue_keyword) => {
-                self.new_expr(continue_keyword.span, nazmc_ast::ExprKind::Continue)
+                let loop_scope_key = if let Some(loop_scope_key) = self.current_loop_scope_key {
+                    loop_scope_key
+                } else {
+                    self.continue_outside_loop_body_errs
+                        .push((self.file_key, continue_keyword.span));
+                    Default::default()
+                };
+
+                self.new_expr(
+                    continue_keyword.span,
+                    nazmc_ast::ExprKind::Continue(loop_scope_key),
+                )
             }
             AtomicExpr::On(on) => self.new_expr(on.span, nazmc_ast::ExprKind::On),
         }
@@ -1474,8 +1532,14 @@ impl<'a> ASTValidator<'a> {
             .span
             .merged_with(&lambda_expr.close_curly.unwrap().span);
 
+        let outter_lambda_scope = self.current_lambda_scope_key;
+
+        self.current_lambda_scope_key = Some(ScopeKey::from(self.ast.scopes.len()));
+
         let lambda_scope_key =
             self.lower_lambda_stms_and_return_expr(lambda_expr.stms, lambda_expr.last_expr, span);
+
+        self.current_lambda_scope_key = outter_lambda_scope;
 
         let mut bound_names_map = HashMap::new();
 
@@ -1664,6 +1728,48 @@ impl<'a> ASTValidator<'a> {
             let mut occurrences = 1;
 
             let code_window = occurrences_code_window(file_info, &mut occurrences, spans, "عنصر");
+
+            let diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+            diagnostics.push(diagnostic);
+        }
+
+        for (file_key, span) in self.return_outside_fn_body_errs {
+            let file_info = &files_infos[file_key];
+
+            let mut code_window = CodeWindow::new(file_info, span.start);
+
+            code_window.mark_error(span, vec![]);
+
+            let msg = "لا يمكن استخدام `أرجع` إلا من داخل نطاق الدوال أو داخل تعبيرات اللامدا".into();
+
+            let diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+            diagnostics.push(diagnostic);
+        }
+
+        for (file_key, span) in self.break_outside_loop_body_errs {
+            let file_info = &files_infos[file_key];
+
+            let mut code_window = CodeWindow::new(file_info, span.start);
+
+            code_window.mark_error(span, vec![]);
+
+            let msg = "لا يمكن استخدام `قطع` إلا من داخل حلقة تكرارية".into();
+
+            let diagnostic = Diagnostic::error(msg, vec![code_window]);
+
+            diagnostics.push(diagnostic);
+        }
+
+        for (file_key, span) in self.continue_outside_loop_body_errs {
+            let file_info = &files_infos[file_key];
+
+            let mut code_window = CodeWindow::new(file_info, span.start);
+
+            code_window.mark_error(span, vec![]);
+
+            let msg = "لا يمكن استخدام `وصل` إلا من داخل حلقة تكرارية".into();
 
             let diagnostic = Diagnostic::error(msg, vec![code_window]);
 

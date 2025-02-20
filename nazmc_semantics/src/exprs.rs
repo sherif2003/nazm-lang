@@ -69,18 +69,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 self.infer_bin_op_expr(&binary_op_expr),
                 ExprKind::BinaryOp(binary_op_expr),
             ),
-            kind @ (ExprKind::Break | ExprKind::Continue) => {
-                if !self.is_inside_loop {
-                    let span = self.get_expr_span(expr_key);
-                    let mut code_window =
-                        CodeWindow::new(&self.files_infos[self.current_file_key], span.start);
-                    code_window.mark_error(span, vec![]);
-                    let diagnostic = Diagnostic::error(
-                        "لا يمكن استخدام `قطع` أو `وصل` إلا من داخل حلقة تكرارية".into(),
-                        vec![code_window],
-                    );
-                    self.diagnostics.push(diagnostic);
-                }
+            kind @ (ExprKind::Break(_) | ExprKind::Continue(_)) => {
                 (self.type_inf_ctx.new_never_ty_var(), kind)
             }
             ExprKind::Return(return_expr) => (
@@ -530,6 +519,7 @@ impl<'a> SemanticsAnalyzer<'a> {
     fn infer_return_expr(
         &mut self,
         ReturnExpr {
+            return_scope,
             return_keyword_span,
             expr,
         }: &ReturnExpr,

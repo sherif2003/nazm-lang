@@ -53,7 +53,6 @@ pub struct SemanticsAnalyzer<'a> {
     current_scope_expected_return_ty: Type,
     current_lambda_first_implicit_return_ty_span: Option<Span>,
     current_lambda_scope_key: Option<ScopeKey>,
-    is_inside_loop: bool,
     /// Map unkown type varialbes to its error message,
     /// where multiple type variable could share the same unknown type
     unknown_ty_vars: HashMap<TypeVarKey, usize>,
@@ -275,11 +274,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                         );
                     }
 
-                    let outer_is_inside_loop = self.is_inside_loop;
-
                     let while_scope_ty = self.infer_scope(while_scope_key);
-
-                    self.is_inside_loop = outer_is_inside_loop;
 
                     if let Err(err) = self.type_inf_ctx.unify(&Type::unit(), &while_scope_ty) {
                         self.add_while_stm_should_return_unit_err(

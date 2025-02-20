@@ -270,7 +270,7 @@ impl<'a> SemanticsAnalyzer<'a> {
                 // So the error must be reported where it is and not here
                 return;
             }
-            kind @ (ExprKind::Break | ExprKind::Continue) => {
+            kind @ (ExprKind::Break(_) | ExprKind::Continue(_)) => {
                 let ty = &self.typed_ast.exprs[&expr_key];
                 let ty = self.type_inf_ctx.apply(&ty);
                 self.typed_ast.exprs.insert(expr_key, ty);

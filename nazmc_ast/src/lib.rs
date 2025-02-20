@@ -337,8 +337,8 @@ pub enum ExprKind {
     UnaryOp(Box<UnaryOpExpr>),
     BinaryOp(Box<BinaryOpExpr>),
     Return(Box<ReturnExpr>),
-    Break,
-    Continue,
+    Break(ScopeKey),
+    Continue(ScopeKey),
     On,
 }
 
@@ -428,6 +428,7 @@ pub struct LambdaExpr {
 
 #[derive(Clone, Debug)]
 pub struct ReturnExpr {
+    pub return_scope: ScopeKey,
     pub return_keyword_span: Span,
     pub expr: Option<ExprKey>,
 }

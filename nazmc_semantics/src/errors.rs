@@ -892,8 +892,7 @@ impl<'a> SemanticsAnalyzer<'a> {
             let curly_braces_span = self.ast.scopes[lambda_scope_key].span;
             code_window.mark_secondary(curly_braces_span, vec!["في تعبير اللامدا هذا".into()]);
         } else {
-            code_window
-                .mark_secondary(span, vec!["تعبير اللامدا هذا يرجع ضمنياً النوع `()`".into()]);
+            code_window.mark_secondary(span, vec!["تعبير اللامدا هذا يرجع ضمنياً النوع `()`".into()]);
         }
 
         code_window.mark_secondary(
